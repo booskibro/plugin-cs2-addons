@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Ref of gameap/gameap providing web/plugin-sdk; pin to a SHA if the SDK drifts
+  # from frontend/package-lock.json
+  GAMEAP_REF: main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin-cs2-addons
+
+      # The frontend depends on file:../../gameap-api/web/plugin-sdk, so the
+      # gameap repo must be checked out as a sibling directory named gameap-api.
+      # (The Rust side pulls gameap-plugin-sdk as a cargo git dependency.)
+      - uses: actions/checkout@v4
+        with:
+          repository: gameap/gameap
+          ref: ${{ env.GAMEAP_REF }}
+          path: gameap-api
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            gameap-api/web/plugin-sdk/package-lock.json
+            plugin-cs2-addons/frontend/package-lock.json
+
+      # The @gameap/ui tarball on npm is missing its icons/ directory, so the
+      # package from the gameap checkout is installed over it. SDK is built with
+      # vite only ("npm run build" also runs tsc, which fails on @gameap/ui's
+      # missing type declarations); the frontend build only needs dist/index.js.
+      - name: Build plugin SDK
+        working-directory: gameap-api/web/plugin-sdk
+        run: |
+          npm ci
+          npm install --no-save ../frontend/packages/gameap-ui
+          npx vite build
+
+      - name: Build frontend
+        working-directory: plugin-cs2-addons/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Test frontend
+        working-directory: plugin-cs2-addons/frontend
+        run: npm test
+
+      # Installs the toolchain and targets pinned in rust-toolchain.toml
+      - name: Set up Rust
+        working-directory: plugin-cs2-addons
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: plugin-cs2-addons
+
+      - name: Test
+        working-directory: plugin-cs2-addons
+        run: cargo test
+
+      - name: Build wasm
+        working-directory: plugin-cs2-addons
+        run: make wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cs2-addons-wasm
+          path: plugin-cs2-addons/cs2-addons.wasm
