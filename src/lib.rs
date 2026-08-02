@@ -23,11 +23,12 @@ use gameap_plugin_sdk::{Plugin, PluginError, register_plugin};
 
 use crate::host_api::HostApi;
 
-// The panel normalizes plugin ids (CompactPluginID); a bare lowercase
-// alphanumeric id is round-trip stable, so /api/plugins/cs2addons/... works
-// literally. A hyphenated id would be rewritten to an FNV hash and break
-// route paths.
-pub const PLUGIN_ID: &str = "cs2addons";
+// The panel normalizes plugin ids (CompactPluginID): the id must decode as
+// base32 (alphabet a-z2-7, no padding — so 2/4/5/7/8/10/12/13 chars) and
+// re-encode to itself, or it is rewritten to an FNV hash, which breaks route
+// paths and the plugin:<id>:manage ability the tab is gated on.
+// "mnzteylemrxw4" is base32("cs2addon") and is round-trip stable.
+pub const PLUGIN_ID: &str = "mnzteylemrxw4";
 
 const FRONTEND_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/plugin.js"));
 const FRONTEND_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/plugin.css"));
@@ -90,7 +91,7 @@ impl<H: HostApi> Plugin for Cs2Addons<H> {
         _req: pb::GetServerAbilitiesRequest,
     ) -> Result<pb::GetServerAbilitiesResponse, PluginError> {
         // Admins get plugin abilities automatically; the frontend tab is
-        // gated on plugin:cs2addons:manage.
+        // gated on plugin:mnzteylemrxw4:manage.
         Ok(pb::GetServerAbilitiesResponse {
             abilities: vec![pb::ServerAbility {
                 name: "manage".into(),

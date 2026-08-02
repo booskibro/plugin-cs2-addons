@@ -126,7 +126,7 @@ Typical flows:
 
 ## HTTP routes (backend)
 
-All admin-only, under `/api/plugins/cs2addons`:
+All admin-only, under `/api/plugins/mnzteylemrxw4`:
 
 ```
 GET    /servers/{id}/state               assembled Metamod/CSS state
@@ -137,7 +137,7 @@ DELETE /servers/{id}/plugins             {name} or ?name=  delete
 ```
 
 The tab is shown only on Source-engine servers and requires the
-`plugin:cs2addons:manage` ability (granted to admins automatically); the
+`plugin:mnzteylemrxw4:manage` ability (granted to admins automatically); the
 backend additionally verifies engine `source` version `2`.
 
 ## Install
@@ -177,7 +177,7 @@ On Windows, `make wasm` translates to
   game is `cs2` (the tab is gated on engine `source`, and the backend
   additionally requires engine version `2` — a custom game entry with a
   different engine string won't show it); your user has admin rights (the
-  `plugin:cs2addons:manage` ability is granted to admins automatically).
+  `plugin:mnzteylemrxw4:manage` ability is granted to admins automatically).
 - **"could not locate the game directory"** (422 on load) — the server dir
   doesn't contain `game/csgo/gameinfo.gi` (or any `game/*/gameinfo.gi`).
   The server probably isn't installed yet or uses a nonstandard layout.

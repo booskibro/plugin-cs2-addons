@@ -3,7 +3,9 @@ import type { PluginDefinition } from '@gameap/plugin-sdk';
 import ModsTab from './components/ModsTab.vue';
 
 export const cs2AddonsPlugin: PluginDefinition = {
-    id: 'cs2addons',
+    // Must match src/lib.rs PLUGIN_ID and survive the panel's CompactPluginID
+    // normalization (valid base32, a-z2-7): base32("cs2addon").
+    id: 'mnzteylemrxw4',
     name: 'CS2 Addons',
     version: '0.1.0',
     apiVersion: '1.0',
@@ -269,7 +271,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
                 name: 'plugins',
                 checkPermission: {
                     type: 'hasServerPermissions',
-                    permissions: ['plugin:cs2addons:manage'],
+                    permissions: ['plugin:mnzteylemrxw4:manage'],
                 },
                 checkGame: {
                     engines: ['Source'],
