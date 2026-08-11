@@ -150,7 +150,7 @@ fn toggle_disable_moves_folder_to_disabled() {
     ));
     assert_eq!(status, 200);
     assert_eq!(body["changed"], true);
-    assert!(host.commands[0].0.contains("mv "));
+    assert_eq!(host.moves.len(), 1, "one native nodefs move, no shell commands");
     assert!(
         host.file(&format!(
             "{GAME}/addons/counterstrikesharp/plugins/disabled/MatchZy/MatchZy.dll"
@@ -199,7 +199,7 @@ fn toggle_is_idempotent() {
     ));
     assert_eq!(status, 200);
     assert_eq!(body["changed"], false);
-    assert!(host.commands.is_empty());
+    assert!(host.moves.is_empty());
 }
 
 #[test]

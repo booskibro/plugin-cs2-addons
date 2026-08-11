@@ -50,13 +50,6 @@ pub struct FileStat {
     pub permissions: u32,
 }
 
-/// Result of a command executed on a node (nodecmd).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandOutput {
-    pub output: String,
-    pub exit_code: i32,
-}
-
 pub trait HostApi {
     fn get_server(&mut self, id: u64) -> HostResult<Option<ServerInfo>>;
     fn get_game(&mut self, code: &str) -> HostResult<Option<GameInfo>>;
@@ -70,12 +63,11 @@ pub trait HostApi {
     -> HostResult<()>;
     fn remove(&mut self, node_id: u64, path: &str, recursive: bool) -> HostResult<()>;
     fn chmod(&mut self, node_id: u64, path: &str, permissions: u32) -> HostResult<()>;
-    fn execute_command(
-        &mut self,
-        node_id: u64,
-        command: &str,
-        work_dir: Option<&str>,
-    ) -> HostResult<CommandOutput>;
+    fn mk_dir(&mut self, node_id: u64, path: &str) -> HostResult<()>;
+    /// Rename/move a file or directory. The daemon's nodecmd has NO shell
+    /// (commands are shellquote-split and exec'd directly), so folder moves
+    /// must use this native op — never `mv` through execute_command.
+    fn move_path(&mut self, node_id: u64, source: &str, destination: &str) -> HostResult<()>;
     fn log_info(&mut self, message: &str);
     fn log_error(&mut self, message: &str);
 }
@@ -85,7 +77,7 @@ pub struct WasmHost;
 /// HashMap-backed fake node used by native handler tests.
 #[cfg(test)]
 pub mod mock {
-    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
 
@@ -102,10 +94,8 @@ pub mod mock {
         pub dirs: BTreeSet<String>,
         /// chmod calls, in call order.
         pub chmods: Vec<(String, u32)>,
-        /// Commands passed to execute_command, in call order.
-        pub commands: Vec<(String, Option<String>)>,
-        /// Canned execute_command results, popped one per call.
-        pub command_results: VecDeque<CommandOutput>,
+        /// move_path calls, in call order.
+        pub moves: Vec<(String, String)>,
         pub logs: Vec<String>,
     }
 
@@ -283,63 +273,33 @@ pub mod mock {
             Ok(())
         }
 
-        fn execute_command(
-            &mut self,
-            _node_id: u64,
-            command: &str,
-            work_dir: Option<&str>,
-        ) -> HostResult<CommandOutput> {
-            self.commands
-                .push((command.to_string(), work_dir.map(str::to_string)));
-            // The default result simulates a successful move: `mv src dst`
-            // (built by handlers::move_dir) is replayed against the fake tree
-            // so follow-up assertions see the effect.
-            if self.command_results.is_empty()
-                && let Some((src, dst)) = parse_mv(command)
-            {
-                self.replay_move(&src, &dst);
+        fn mk_dir(&mut self, _node_id: u64, path: &str) -> HostResult<()> {
+            self.add_dir(path);
+            Ok(())
+        }
+
+        fn move_path(&mut self, _node_id: u64, source: &str, destination: &str) -> HostResult<()> {
+            let source = source.trim_end_matches('/');
+            let destination = destination.trim_end_matches('/');
+            if !self.dirs.contains(source) && !self.files.contains_key(source) {
+                return Err(HostApiError::Op(format!("no such file: {source}")));
             }
-            Ok(self.command_results.pop_front().unwrap_or(CommandOutput {
-                output: String::new(),
-                exit_code: 0,
-            }))
-        }
-
-        fn log_info(&mut self, message: &str) {
-            self.logs.push(format!("INFO {message}"));
-        }
-
-        fn log_error(&mut self, message: &str) {
-            self.logs.push(format!("ERROR {message}"));
-        }
-    }
-
-    /// Extracts (src, dst) from the single-quoted `mkdir -p '..' && mv '..' '..'`
-    /// commands the handlers build for linux nodes.
-    fn parse_mv(command: &str) -> Option<(String, String)> {
-        let mv_idx = command.find("mv '")?;
-        let rest = &command[mv_idx + 4..];
-        let (src, rest) = rest.split_once('\'')?;
-        let rest = rest.strip_prefix(" '")?;
-        let (dst, _) = rest.split_once('\'')?;
-        Some((src.to_string(), dst.to_string()))
-    }
-
-    impl MockHost {
-        fn replay_move(&mut self, src: &str, dst: &str) {
-            if let Some(idx) = dst.rfind('/') {
-                self.add_dir(&dst[..idx]);
+            self.moves.push((source.to_string(), destination.to_string()));
+            if let Some(content) = self.files.remove(source) {
+                self.add_file(destination, &content);
+                return Ok(());
             }
-            let src_prefix = format!("{src}/");
+            let src_prefix = format!("{source}/");
             let moved_dirs: Vec<String> = self
                 .dirs
                 .iter()
-                .filter(|dir| *dir == src || dir.starts_with(&src_prefix))
+                .filter(|dir| *dir == source || dir.starts_with(&src_prefix))
                 .cloned()
                 .collect();
             for dir in moved_dirs {
                 self.dirs.remove(&dir);
-                self.dirs.insert(format!("{dst}{}", &dir[src.len()..]));
+                self.dirs
+                    .insert(format!("{destination}{}", &dir[source.len()..]));
             }
             let moved_files: Vec<String> = self
                 .files
@@ -350,9 +310,18 @@ pub mod mock {
             for file in moved_files {
                 if let Some(content) = self.files.remove(&file) {
                     self.files
-                        .insert(format!("{dst}{}", &file[src.len()..]), content);
+                        .insert(format!("{destination}{}", &file[source.len()..]), content);
                 }
             }
+            Ok(())
+        }
+
+        fn log_info(&mut self, message: &str) {
+            self.logs.push(format!("INFO {message}"));
+        }
+
+        fn log_error(&mut self, message: &str) {
+            self.logs.push(format!("ERROR {message}"));
         }
     }
 }
@@ -360,7 +329,7 @@ pub mod mock {
 #[cfg(target_arch = "wasm32")]
 mod wasm {
     use gameap_plugin_sdk::host;
-    use gameap_plugin_sdk::proto::gameap::plugin::sdk::{games, nodecmd, nodefs, nodes, servers};
+    use gameap_plugin_sdk::proto::gameap::plugin::sdk::{games, nodefs, nodes, servers};
 
     use super::*;
 
@@ -502,24 +471,30 @@ mod wasm {
             }
         }
 
-        fn execute_command(
-            &mut self,
-            node_id: u64,
-            command: &str,
-            work_dir: Option<&str>,
-        ) -> HostResult<CommandOutput> {
-            let resp = host::nodecmd::execute_command(&nodecmd::ExecuteCommandRequest {
+        fn mk_dir(&mut self, node_id: u64, path: &str) -> HostResult<()> {
+            let resp = host::nodefs::mk_dir(&nodefs::MkDirRequest {
                 node_id,
-                command: command.to_owned(),
-                work_dir: work_dir.map(str::to_owned),
+                path: path.to_owned(),
             })
             .map_err(call_err)?;
-            match resp.error {
-                Some(err) => Err(HostApiError::Op(err)),
-                None => Ok(CommandOutput {
-                    output: resp.output,
-                    exit_code: resp.exit_code,
-                }),
+            if resp.success {
+                Ok(())
+            } else {
+                Err(HostApiError::Op(resp.error.unwrap_or_default()))
+            }
+        }
+
+        fn move_path(&mut self, node_id: u64, source: &str, destination: &str) -> HostResult<()> {
+            let resp = host::nodefs::move_path(&nodefs::MoveRequest {
+                node_id,
+                source: source.to_owned(),
+                destination: destination.to_owned(),
+            })
+            .map_err(call_err)?;
+            if resp.success {
+                Ok(())
+            } else {
+                Err(HostApiError::Op(resp.error.unwrap_or_default()))
             }
         }
 

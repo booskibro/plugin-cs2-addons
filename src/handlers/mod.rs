@@ -84,8 +84,11 @@ fn find_plugin_folder<H: HostApi>(
     Ok(None)
 }
 
-/// Moves a directory on the node via nodecmd (nodefs has no rename).
-/// The destination parent is created when missing.
+/// Moves a directory via the daemon's native nodefs move, creating the
+/// destination parent when missing. NEVER via execute_command: the daemon
+/// shellquote-splits and execs commands directly — there is no shell, so
+/// `mkdir -p X && mv A B` becomes one mkdir call that creates junk
+/// directories (including an empty one AT the move target) and exits 0.
 fn move_dir<H: HostApi>(
     host: &mut H,
     ctx: &ServerCtx,
@@ -96,42 +99,9 @@ fn move_dir<H: HostApi>(
         Some(idx) => &dst_abs[..idx],
         None => return Err(ApiError::internal("move destination has no parent")),
     };
-    let command = if ctx.node_os.to_ascii_lowercase().contains("windows") {
-        format!(
-            "cmd /C \"if not exist \"{}\" mkdir \"{}\" & move /Y \"{}\" \"{}\"\"",
-            win_path(dst_parent),
-            win_path(dst_parent),
-            win_path(src_abs),
-            win_path(dst_abs),
-        )
-    } else {
-        format!(
-            "mkdir -p '{}' && mv '{}' '{}'",
-            sh_quote(dst_parent),
-            sh_quote(src_abs),
-            sh_quote(dst_abs),
-        )
-    };
-    let result = host.execute_command(ctx.node_id, &command, None)?;
-    if result.exit_code != 0 {
-        return Err(ApiError::new(
-            502,
-            "NODE_OPERATION_FAILED",
-            format!(
-                "failed to move plugin folder (exit {}): {}",
-                result.exit_code,
-                result.output.trim()
-            ),
-        ));
+    if host.stat(ctx.node_id, dst_parent)?.is_none() {
+        host.mk_dir(ctx.node_id, dst_parent)?;
     }
+    host.move_path(ctx.node_id, src_abs, dst_abs)?;
     Ok(())
-}
-
-/// Escapes a path for single-quoted POSIX shell interpolation.
-fn sh_quote(path: &str) -> String {
-    path.replace('\'', r"'\''")
-}
-
-fn win_path(path: &str) -> String {
-    path.replace('/', "\\")
 }

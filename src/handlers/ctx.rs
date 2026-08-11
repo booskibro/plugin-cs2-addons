@@ -13,7 +13,6 @@ const GAME_DIR_SCAN_CAP: usize = 16;
 pub struct ServerCtx {
     pub server_id: u64,
     pub node_id: u64,
-    pub node_os: String,
     pub game_code: String,
     pub engine: String,
     pub engine_version: String,
@@ -71,7 +70,6 @@ impl ServerCtx {
         Ok(ServerCtx {
             server_id,
             node_id: node.id,
-            node_os: node.os,
             game_code: server.game_code,
             engine: game.engine,
             engine_version: game.engine_version,

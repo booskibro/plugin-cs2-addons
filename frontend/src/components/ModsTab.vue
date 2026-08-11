@@ -218,7 +218,10 @@ const rows = computed<PluginRow[]>(() => {
             rconOk: rconOk.value,
         });
         return {
-            key: `css:${entry.name}`,
+            // Enabled state is part of the key: a folder present in BOTH plugins/
+            // and plugins/disabled/ (a broken state) must show as two rows, not
+            // have one silently swallow the other in the table's keyed diff.
+            key: `css:${entry.name}:${entry.enabled ? 'on' : 'off'}`,
             name: entry.name,
             displayName: runtime?.name ?? prettyName(entry.name),
             version: runtime?.version ?? null,
