@@ -26,9 +26,6 @@ const FIRST_RESPONSE_TIMEOUT_MS: u32 = 5_000;
 /// Idle gap that ends a response once something has arrived (the fallback
 /// stop when a server does not echo the end marker).
 const IDLE_TIMEOUT_MS: u32 = 600;
-/// Patience after an early marker echo with no output yet: CS2 produces
-/// command output asynchronously and can be slower than the normal idle gap.
-const GRACE_TIMEOUT_MS: u32 = 1_800;
 
 pub struct RecvChunk {
     pub data: Vec<u8>,
@@ -157,47 +154,38 @@ pub struct ExecOutcome {
 
 /// Runs one command and returns its full (possibly multi-packet) output.
 ///
-/// An end-marker request (an empty RESPONSE_VALUE the server echoes back in
-/// order) delimits the response; servers that do not echo it are handled by
-/// the idle-gap fallback. RESPONSE_VALUE packets with foreign ids are
-/// buffered separately: normally they are CS2 console streaming and are
-/// discarded, but when a server returns NOTHING under our id they are the
-/// command output under a nonstandard id, and they win over an empty answer.
+/// NO end-marker request is sent. The classic srcds trick (an empty
+/// RESPONSE_VALUE pipelined behind the command, echoed back in order) makes
+/// some CS2 builds DISCARD the pending command's output — the field signature
+/// is auth passing while every command, `status` included, returns empty,
+/// with plain single-request external tools working fine against the same
+/// server. The response is delimited by an idle gap instead, which the
+/// multi-packet reads already handle.
+///
+/// RESPONSE_VALUE packets with foreign ids are buffered separately: normally
+/// they are CS2 console streaming and are discarded, but when a server
+/// returns NOTHING under our id they are the command output under a
+/// nonstandard id, and they win over an empty answer.
 pub fn execute<W: Wire>(
     wire: &mut W,
     session: &mut Session,
     command: &str,
     request_id: i32,
-    marker_id: i32,
 ) -> Result<ExecOutcome, String> {
     wire.send(&encode_packet(request_id, TYPE_EXEC_COMMAND, command.as_bytes()))?;
-    wire.send(&encode_packet(marker_id, TYPE_RESPONSE_VALUE, b""))?;
 
     let mut output: Vec<u8> = Vec::new();
     let mut foreign: Vec<u8> = Vec::new();
     let mut own_packets = 0u32;
     let mut foreign_packets = 0u32;
-    let mut marker_seen = false;
     for _ in 0..MAX_PACKETS_PER_EXCHANGE {
         let received_any = own_packets > 0 || foreign_packets > 0;
         let timeout_ms = if received_any {
             IDLE_TIMEOUT_MS
-        } else if marker_seen {
-            GRACE_TIMEOUT_MS
         } else {
             FIRST_RESPONSE_TIMEOUT_MS
         };
         match session.next_packet(wire, timeout_ms)? {
-            Some(packet) if packet.id == marker_id => {
-                if own_packets > 0 {
-                    break;
-                }
-                // CS2 answers marker requests on its network thread while the
-                // command's output is produced asynchronously on the game
-                // thread — the echo can overtake the output. Grace-read until
-                // an idle gap instead of declaring the response empty.
-                marker_seen = true;
-            }
             Some(packet) if packet.id == request_id && packet.ptype == TYPE_RESPONSE_VALUE => {
                 own_packets += 1;
                 if output.len() + packet.body.len() > MAX_TOTAL_OUTPUT {
@@ -212,8 +200,11 @@ pub fn execute<W: Wire>(
                 }
             }
             Some(_) => continue, // auth responses, stale packets
-            None if own_packets > 0 || foreign_packets > 0 || marker_seen => break,
-            None => return Err("server did not answer the command".into()),
+            None if received_any => break, // idle gap = response complete
+            // Total silence is a legitimate answer to a silent command
+            // (css_plugins load, exec …) — CS2 sends nothing at all for some
+            // of them. Empty output, not an error.
+            None => break,
         }
     }
 
@@ -305,14 +296,16 @@ mod tests {
     }
 
     #[test]
-    fn exec_single_packet_with_marker() {
+    fn exec_sends_only_the_command() {
+        // No pipelined marker request: some CS2 builds discard the pending
+        // command's output when a second request arrives behind it.
         let mut wire = ScriptedWire::default();
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"hello");
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
+        wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "echo", 10, 11).expect("exec").output;
+        let out = execute(&mut wire, &mut session, "echo", 10).expect("exec").output;
         assert_eq!(out, "hello");
-        assert_eq!(wire.sent.len(), 2, "command + marker");
+        assert_eq!(wire.sent.len(), 1, "exactly one request on the wire");
     }
 
     #[test]
@@ -321,32 +314,10 @@ mod tests {
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"part1 ");
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"part2 ");
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"part3");
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
-        let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "meta list", 10, 11).expect("exec").output;
-        assert_eq!(out, "part1 part2 part3");
-    }
-
-    #[test]
-    fn exec_skips_unsolicited_console_noise() {
-        let mut wire = ScriptedWire::default();
-        wire.push_packet(0, TYPE_RESPONSE_VALUE, b"[Server] console spam\n");
-        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"answer");
-        wire.push_packet(0, TYPE_RESPONSE_VALUE, b"more spam\n");
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
-        let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "status", 10, 11).expect("exec").output;
-        assert_eq!(out, "answer");
-    }
-
-    #[test]
-    fn exec_idle_gap_ends_response_without_marker() {
-        let mut wire = ScriptedWire::default();
-        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"no marker support");
         wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "status", 10, 11).expect("exec").output;
-        assert_eq!(out, "no marker support");
+        let out = execute(&mut wire, &mut session, "meta list", 10).expect("exec").output;
+        assert_eq!(out, "part1 part2 part3");
     }
 
     #[test]
@@ -355,39 +326,26 @@ mod tests {
         let big = vec![b'x'; 100 * 1024];
         let mut wire = ScriptedWire::default();
         wire.push_packet(10, TYPE_RESPONSE_VALUE, &big);
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
+        wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "cvarlist", 10, 11).expect("exec").output;
+        let out = execute(&mut wire, &mut session, "cvarlist", 10).expect("exec").output;
         assert_eq!(out.len(), big.len());
     }
 
     #[test]
     fn exec_handles_split_and_coalesced_frames() {
         // Two packets delivered as: half of A / rest of A + all of B.
-        let a = encode_packet(10, TYPE_RESPONSE_VALUE, b"split");
-        let b = encode_packet(11, TYPE_RESPONSE_VALUE, b"");
+        let a = encode_packet(10, TYPE_RESPONSE_VALUE, b"split ");
+        let b = encode_packet(10, TYPE_RESPONSE_VALUE, b"frames");
         let mut wire = ScriptedWire::default();
         wire.push_raw(a[..7].to_vec());
         let mut rest = a[7..].to_vec();
         rest.extend_from_slice(&b);
         wire.push_raw(rest);
-        let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "x", 10, 11).expect("exec").output;
-        assert_eq!(out, "split");
-    }
-
-    #[test]
-    fn exec_marker_overtaking_output_still_collects() {
-        // CS2's async console: the marker echo arrives BEFORE the command
-        // output. The engine must keep reading instead of returning "".
-        let mut wire = ScriptedWire::default();
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
-        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"late ");
-        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"output");
         wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "meta version", 10, 11).expect("exec").output;
-        assert_eq!(out, "late output");
+        let out = execute(&mut wire, &mut session, "x", 10).expect("exec").output;
+        assert_eq!(out, "split frames");
     }
 
     #[test]
@@ -396,11 +354,10 @@ mod tests {
         // request. With zero own-id packets, the foreign output must win over
         // an empty answer.
         let mut wire = ScriptedWire::default();
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b""); // marker echo first
         wire.push_packet(0, TYPE_RESPONSE_VALUE, b"hostname: friendserver");
         wire.push_timeout();
         let mut session = Session::default();
-        let outcome = execute(&mut wire, &mut session, "status", 10, 11).expect("exec");
+        let outcome = execute(&mut wire, &mut session, "status", 10).expect("exec");
         assert_eq!(outcome.output, "hostname: friendserver");
         assert!(outcome.fallback_used);
         assert_eq!(outcome.foreign_packets, 1);
@@ -412,29 +369,23 @@ mod tests {
         let mut wire = ScriptedWire::default();
         wire.push_packet(0, TYPE_RESPONSE_VALUE, b"[Server] noise\n");
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"real answer");
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
+        wire.push_packet(0, TYPE_RESPONSE_VALUE, b"more noise\n");
+        wire.push_timeout();
         let mut session = Session::default();
-        let outcome = execute(&mut wire, &mut session, "status", 10, 11).expect("exec");
+        let outcome = execute(&mut wire, &mut session, "status", 10).expect("exec");
         assert_eq!(outcome.output, "real answer");
         assert!(!outcome.fallback_used);
     }
 
     #[test]
-    fn exec_marker_then_silence_is_empty_not_error() {
-        let mut wire = ScriptedWire::default();
-        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
-        wire.push_timeout();
-        let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "silent_cmd", 10, 11).expect("exec").output;
-        assert_eq!(out, "");
-    }
-
-    #[test]
-    fn exec_no_response_errors() {
+    fn exec_total_silence_is_empty_not_error() {
+        // CS2 sends nothing at all for some silent commands.
         let mut wire = ScriptedWire::default();
         wire.push_timeout();
         let mut session = Session::default();
-        assert!(execute(&mut wire, &mut session, "x", 10, 11).is_err());
+        let outcome = execute(&mut wire, &mut session, "exec cfg", 10).expect("exec");
+        assert_eq!(outcome.output, "");
+        assert_eq!(outcome.own_packets, 0);
     }
 
     #[test]
@@ -442,6 +393,6 @@ mod tests {
         let mut wire = ScriptedWire::default();
         wire.push_raw(vec![0xFF, 0xFF, 0xFF, 0xFF, 1, 2, 3]);
         let mut session = Session::default();
-        assert!(execute(&mut wire, &mut session, "x", 10, 11).is_err());
+        assert!(execute(&mut wire, &mut session, "x", 10).is_err());
     }
 }

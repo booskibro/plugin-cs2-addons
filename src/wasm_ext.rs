@@ -138,12 +138,12 @@ thread_local! {
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-fn take_ids() -> (i32, i32) {
+fn take_id() -> i32 {
     NEXT_ID.with(|cell| {
         let id = cell.get();
         // Wrap far below the sign bit; -1 is the auth-failure sentinel.
-        cell.set(if id > 0x0FFF_FFF0 { 100 } else { id + 2 });
-        (id, id + 1)
+        cell.set(if id > 0x0FFF_FFF0 { 100 } else { id + 1 });
+        id
     })
 }
 
@@ -212,7 +212,7 @@ pub extern "C" fn protocol_service_rcon_open(ptr: u32, size: u32) -> u64 {
         // RconClose — an open is always a fresh connection, so any stale
         // reassembly buffer under this handle must not leak into it.
         drop_session(req.conn_handle);
-        let (auth_id, _) = take_ids();
+        let auth_id = take_id();
         let outcome = with_session(req.conn_handle, |session| {
             rcon::authenticate(&mut wire, session, &req.password, auth_id)
         });
@@ -245,9 +245,9 @@ pub extern "C" fn protocol_service_rcon_execute(ptr: u32, size: u32) -> u64 {
         let mut wire = NetWire {
             handle: req.conn_handle,
         };
-        let (exec_id, marker_id) = take_ids();
+        let exec_id = take_id();
         let result = with_session(req.conn_handle, |session| {
-            rcon::execute(&mut wire, session, &req.command, exec_id, marker_id)
+            rcon::execute(&mut wire, session, &req.command, exec_id)
         });
         Ok(match result {
             Ok(outcome) => {
