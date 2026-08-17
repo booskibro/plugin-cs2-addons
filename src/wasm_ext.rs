@@ -250,10 +250,24 @@ pub extern "C" fn protocol_service_rcon_execute(ptr: u32, size: u32) -> u64 {
             rcon::execute(&mut wire, session, &req.command, exec_id, marker_id)
         });
         Ok(match result {
-            Ok(output) => protocol::RconExecuteResponse {
-                output,
-                error: None,
-            },
+            Ok(outcome) => {
+                // Quiet on healthy exchanges; loud enough to diagnose a server
+                // that answers with foreign ids or nothing at all.
+                if outcome.fallback_used || outcome.output.is_empty() {
+                    host::log::info(format!(
+                        "cs2-addons rcon: {:?} -> {} bytes (own packets {}, foreign packets {}, foreign-id fallback {})",
+                        req.command,
+                        outcome.output.len(),
+                        outcome.own_packets,
+                        outcome.foreign_packets,
+                        outcome.fallback_used,
+                    ));
+                }
+                protocol::RconExecuteResponse {
+                    output: outcome.output,
+                    error: None,
+                }
+            }
             Err(err) => protocol::RconExecuteResponse {
                 output: String::new(),
                 error: Some(err),

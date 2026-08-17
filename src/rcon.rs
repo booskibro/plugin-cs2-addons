@@ -26,6 +26,9 @@ const FIRST_RESPONSE_TIMEOUT_MS: u32 = 5_000;
 /// Idle gap that ends a response once something has arrived (the fallback
 /// stop when a server does not echo the end marker).
 const IDLE_TIMEOUT_MS: u32 = 600;
+/// Patience after an early marker echo with no output yet: CS2 produces
+/// command output asynchronously and can be slower than the normal idle gap.
+const GRACE_TIMEOUT_MS: u32 = 1_800;
 
 pub struct RecvChunk {
     pub data: Vec<u8>,
@@ -140,34 +143,53 @@ pub fn authenticate<W: Wire>(
     Err("no auth response among the first packets".into())
 }
 
+/// What one command exchange produced, with enough detail to diagnose
+/// nonstandard servers from the panel log.
+#[derive(Debug, Default)]
+pub struct ExecOutcome {
+    pub output: String,
+    /// The output came from RESPONSE_VALUE packets carrying a FOREIGN request
+    /// id — some CS2 builds do not echo the client's id on command output.
+    pub fallback_used: bool,
+    pub own_packets: u32,
+    pub foreign_packets: u32,
+}
+
 /// Runs one command and returns its full (possibly multi-packet) output.
 ///
 /// An end-marker request (an empty RESPONSE_VALUE the server echoes back in
 /// order) delimits the response; servers that do not echo it are handled by
-/// the idle-gap fallback. Unsolicited packets with foreign ids — CS2 console
-/// streaming — are skipped.
+/// the idle-gap fallback. RESPONSE_VALUE packets with foreign ids are
+/// buffered separately: normally they are CS2 console streaming and are
+/// discarded, but when a server returns NOTHING under our id they are the
+/// command output under a nonstandard id, and they win over an empty answer.
 pub fn execute<W: Wire>(
     wire: &mut W,
     session: &mut Session,
     command: &str,
     request_id: i32,
     marker_id: i32,
-) -> Result<String, String> {
+) -> Result<ExecOutcome, String> {
     wire.send(&encode_packet(request_id, TYPE_EXEC_COMMAND, command.as_bytes()))?;
     wire.send(&encode_packet(marker_id, TYPE_RESPONSE_VALUE, b""))?;
 
     let mut output: Vec<u8> = Vec::new();
-    let mut received_any = false;
+    let mut foreign: Vec<u8> = Vec::new();
+    let mut own_packets = 0u32;
+    let mut foreign_packets = 0u32;
     let mut marker_seen = false;
     for _ in 0..MAX_PACKETS_PER_EXCHANGE {
-        let timeout_ms = if received_any || marker_seen {
+        let received_any = own_packets > 0 || foreign_packets > 0;
+        let timeout_ms = if received_any {
             IDLE_TIMEOUT_MS
+        } else if marker_seen {
+            GRACE_TIMEOUT_MS
         } else {
             FIRST_RESPONSE_TIMEOUT_MS
         };
         match session.next_packet(wire, timeout_ms)? {
             Some(packet) if packet.id == marker_id => {
-                if received_any {
+                if own_packets > 0 {
                     break;
                 }
                 // CS2 answers marker requests on its network thread while the
@@ -177,18 +199,32 @@ pub fn execute<W: Wire>(
                 marker_seen = true;
             }
             Some(packet) if packet.id == request_id && packet.ptype == TYPE_RESPONSE_VALUE => {
-                received_any = true;
+                own_packets += 1;
                 if output.len() + packet.body.len() > MAX_TOTAL_OUTPUT {
                     return Err("response exceeds the output cap".into());
                 }
                 output.extend_from_slice(&packet.body);
             }
-            Some(_) => continue, // unsolicited console output, stale packets
-            None if received_any || marker_seen => break, // idle gap = done
+            Some(packet) if packet.ptype == TYPE_RESPONSE_VALUE => {
+                foreign_packets += 1;
+                if foreign.len() + packet.body.len() <= MAX_TOTAL_OUTPUT {
+                    foreign.extend_from_slice(&packet.body);
+                }
+            }
+            Some(_) => continue, // auth responses, stale packets
+            None if own_packets > 0 || foreign_packets > 0 || marker_seen => break,
             None => return Err("server did not answer the command".into()),
         }
     }
-    Ok(String::from_utf8_lossy(&output).into_owned())
+
+    let fallback_used = output.is_empty() && !foreign.is_empty();
+    let bytes = if fallback_used { &foreign } else { &output };
+    Ok(ExecOutcome {
+        output: String::from_utf8_lossy(bytes).into_owned(),
+        fallback_used,
+        own_packets,
+        foreign_packets,
+    })
 }
 
 #[cfg(test)]
@@ -274,7 +310,7 @@ mod tests {
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"hello");
         wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "echo", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "echo", 10, 11).expect("exec").output;
         assert_eq!(out, "hello");
         assert_eq!(wire.sent.len(), 2, "command + marker");
     }
@@ -287,7 +323,7 @@ mod tests {
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"part3");
         wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "meta list", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "meta list", 10, 11).expect("exec").output;
         assert_eq!(out, "part1 part2 part3");
     }
 
@@ -299,7 +335,7 @@ mod tests {
         wire.push_packet(0, TYPE_RESPONSE_VALUE, b"more spam\n");
         wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "status", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "status", 10, 11).expect("exec").output;
         assert_eq!(out, "answer");
     }
 
@@ -309,7 +345,7 @@ mod tests {
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"no marker support");
         wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "status", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "status", 10, 11).expect("exec").output;
         assert_eq!(out, "no marker support");
     }
 
@@ -321,7 +357,7 @@ mod tests {
         wire.push_packet(10, TYPE_RESPONSE_VALUE, &big);
         wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "cvarlist", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "cvarlist", 10, 11).expect("exec").output;
         assert_eq!(out.len(), big.len());
     }
 
@@ -336,7 +372,7 @@ mod tests {
         rest.extend_from_slice(&b);
         wire.push_raw(rest);
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "x", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "x", 10, 11).expect("exec").output;
         assert_eq!(out, "split");
     }
 
@@ -350,8 +386,37 @@ mod tests {
         wire.push_packet(10, TYPE_RESPONSE_VALUE, b"output");
         wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "meta version", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "meta version", 10, 11).expect("exec").output;
         assert_eq!(out, "late output");
+    }
+
+    #[test]
+    fn exec_foreign_id_output_used_when_nothing_matches() {
+        // Some CS2 builds answer command output under a DIFFERENT id than the
+        // request. With zero own-id packets, the foreign output must win over
+        // an empty answer.
+        let mut wire = ScriptedWire::default();
+        wire.push_packet(11, TYPE_RESPONSE_VALUE, b""); // marker echo first
+        wire.push_packet(0, TYPE_RESPONSE_VALUE, b"hostname: friendserver");
+        wire.push_timeout();
+        let mut session = Session::default();
+        let outcome = execute(&mut wire, &mut session, "status", 10, 11).expect("exec");
+        assert_eq!(outcome.output, "hostname: friendserver");
+        assert!(outcome.fallback_used);
+        assert_eq!(outcome.foreign_packets, 1);
+    }
+
+    #[test]
+    fn exec_own_id_output_beats_console_noise() {
+        // When own-id packets exist, foreign packets stay classified as noise.
+        let mut wire = ScriptedWire::default();
+        wire.push_packet(0, TYPE_RESPONSE_VALUE, b"[Server] noise\n");
+        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"real answer");
+        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
+        let mut session = Session::default();
+        let outcome = execute(&mut wire, &mut session, "status", 10, 11).expect("exec");
+        assert_eq!(outcome.output, "real answer");
+        assert!(!outcome.fallback_used);
     }
 
     #[test]
@@ -360,7 +425,7 @@ mod tests {
         wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
         wire.push_timeout();
         let mut session = Session::default();
-        let out = execute(&mut wire, &mut session, "silent_cmd", 10, 11).expect("exec");
+        let out = execute(&mut wire, &mut session, "silent_cmd", 10, 11).expect("exec").output;
         assert_eq!(out, "");
     }
 

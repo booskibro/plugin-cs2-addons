@@ -7,7 +7,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
     // normalization (valid base32, a-z2-7): base32("cs2addon").
     id: 'mnzteylemrxw4',
     name: 'CS2 Addons',
-    version: '0.3.1',
+    version: '0.3.2',
     apiVersion: '1.0',
     description: 'Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers',
     author: 'BooskiBro (after gameap/plugin-goldsrc-addons by GameAP)',
