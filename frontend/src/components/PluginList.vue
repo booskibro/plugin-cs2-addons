@@ -113,6 +113,7 @@ import {
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
 import { hotActionForStatus } from '../lib/status';
+import { versionsMatch } from '../lib/version';
 import type { PluginRow, PluginUpdateInfo, RowStatus } from '../types';
 
 const props = defineProps<{
@@ -291,9 +292,7 @@ function updateFor(row: PluginRow): PluginUpdateInfo | null {
     if (!update || !row.version) {
         return null;
     }
-    const current = row.version.replace(/^v/, '');
-    const latest = update.version.replace(/^v/, '');
-    return current !== latest ? update : null;
+    return versionsMatch(row.version, update.version) ? null : update;
 }
 
 function statusMeta(row: PluginRow): { cls: string; text: string } {

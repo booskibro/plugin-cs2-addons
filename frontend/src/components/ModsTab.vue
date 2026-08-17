@@ -239,6 +239,7 @@ import {
 } from '../lib/rcon-parse';
 import { prettyName } from '../lib/naming';
 import { computeRowStatus } from '../lib/status';
+import { versionsMatch } from '../lib/version';
 import type {
     DoctorCheck,
     PlatformVersion,
@@ -374,7 +375,7 @@ const updatableCatalog = computed<PluginUpdateInfo[]>(() =>
         if (!row?.version) {
             return false;
         }
-        return row.version.replace(/^v/, '') !== info.version.replace(/^v/, '');
+        return !versionsMatch(row.version, info.version);
     }),
 );
 
@@ -553,6 +554,9 @@ async function onHotAction(
                 `${row.name}/${row.name}.dll`,
             );
         }
+        // CS2 loads/unloads asynchronously — an immediate re-list races the
+        // action and misreports it as failed.
+        await new Promise((resolve) => window.setTimeout(resolve, 800));
         cssRuntime.value = parseCssPlugins(
             await rcon(props.serverId, 'css_plugins list'),
         );
@@ -571,7 +575,9 @@ async function onHotAction(
                     : action === 'reload'
                       ? 'reload_failed'
                       : 'load_failed_named';
-            toast('error', output || trans(key, { name: row.displayName }));
+            // Whitespace-only command output makes an unreadable empty toast.
+            const detail = output.trim();
+            toast('error', detail !== '' ? detail : trans(key, { name: row.displayName }));
         }
     } catch (error) {
         applyRconFailure(error);

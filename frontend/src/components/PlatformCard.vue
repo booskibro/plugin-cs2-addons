@@ -144,6 +144,7 @@ import { computed } from 'vue';
 import { NCard, NSwitch, NTooltip } from 'naive-ui';
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
+import { versionsMatch } from '../lib/version';
 import type { MetamodPluginEntry, PlatformVersion, PluginRow, StateResponse } from '../types';
 
 const props = defineProps<{
@@ -186,9 +187,7 @@ const updateAvailable = computed(() => {
     if (!props.updateVersion || !props.version || !installed.value) {
         return false;
     }
-    const current = props.version.version.replace(/^v/, '');
-    const latest = props.updateVersion.replace(/^v/, '');
-    return current !== latest;
+    return !versionsMatch(props.version.version, props.updateVersion);
 });
 
 const showActions = computed(
