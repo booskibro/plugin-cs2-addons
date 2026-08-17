@@ -30,14 +30,19 @@ pub fn handle<H: HostApi>(
         ));
     }
 
+    if !matches!(request.kind.as_str(), "metamod" | "css") {
+        return Err(ApiError::bad_request(format!(
+            "unknown platform kind {:?}; expected \"metamod\" or \"css\"",
+            request.kind
+        )));
+    }
+
+    // Updates overwrite in place — keep a way back.
+    super::snapshots::try_auto_snapshot(host, &ctx, actor, None);
+
     let (version, gameinfo_patched) = match request.kind.as_str() {
         "metamod" => install_metamod(host, &ctx)?,
-        "css" => install_css(host, &ctx)?,
-        other => {
-            return Err(ApiError::bad_request(format!(
-                "unknown platform kind {other:?}; expected \"metamod\" or \"css\""
-            )));
-        }
+        _ => install_css(host, &ctx)?,
     };
 
     super::audit::record(

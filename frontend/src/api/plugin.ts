@@ -7,6 +7,8 @@ import type {
     AuditEntry,
     CatalogEntryInfo,
     CatalogInstallResult,
+    DoctorCheck,
+    InstallArchiveResult,
     LogsResponse,
     PlatformInstallResult,
     SnapshotCreateResult,
@@ -165,6 +167,24 @@ export async function deleteSnapshot(
 export async function getAudit(pluginId: string, serverId: number): Promise<AuditEntry[]> {
     const response = await axios.get(`${base(pluginId)}/servers/${serverId}/audit`);
     return (response.data as { entries: AuditEntry[] }).entries;
+}
+
+export async function installArchive(
+    pluginId: string,
+    serverId: number,
+    path: string,
+    force: boolean,
+): Promise<InstallArchiveResult> {
+    const response = await axios.post(
+        `${base(pluginId)}/servers/${serverId}/plugins/install-archive`,
+        { path, force },
+    );
+    return response.data as InstallArchiveResult;
+}
+
+export async function getDoctor(pluginId: string, serverId: number): Promise<DoctorCheck[]> {
+    const response = await axios.get(`${base(pluginId)}/servers/${serverId}/doctor`);
+    return (response.data as { checks: DoctorCheck[] }).checks;
 }
 
 /** Human-oriented message from a backend error response. */

@@ -1,8 +1,10 @@
 pub mod add;
+pub mod archive_install;
 pub mod attributes;
 pub mod audit;
 pub mod catalog_routes;
 pub mod ctx;
+pub mod doctor;
 pub mod logs;
 pub mod metamod;
 pub mod platform;
@@ -100,6 +102,115 @@ fn find_plugin_folder<H: HostApi>(
         return Ok(Some((disabled_abs, false)));
     }
     Ok(None)
+}
+
+/// Writes extracted archive entries to their install root. Shared by the
+/// catalog installer and the zip-upload installer.
+pub(crate) fn write_archive_entries<H: HostApi>(
+    host: &mut H,
+    ctx: &ServerCtx,
+    entries: &[crate::source2::archive::ArchiveEntry],
+    root: &crate::source2::archive::InstallRoot,
+) -> Result<u32, ApiError> {
+    use crate::source2::archive::InstallRoot;
+
+    let plugins_abs = css_plugins_abs(ctx);
+    let mut written = 0u32;
+    let mut ensured_dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for entry in entries {
+        let target_abs = match root {
+            InstallRoot::GameDir => paths::join(&ctx.game_abs, &entry.path),
+            InstallRoot::PluginsDir => paths::join(&plugins_abs, &entry.path),
+            InstallRoot::WrapIntoFolder(folder) => {
+                paths::join(&paths::join(&plugins_abs, folder), &entry.path)
+            }
+        };
+        ensure_parent_dirs(host, ctx.node_id, &target_abs, &mut ensured_dirs)?;
+        host.upload(ctx.node_id, &target_abs, &entry.data, entry.mode)?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// The CSS plugin folders an extracted archive creates, per install root.
+pub(crate) fn archive_plugin_folders(
+    entries: &[crate::source2::archive::ArchiveEntry],
+    root: &crate::source2::archive::InstallRoot,
+) -> Vec<String> {
+    use crate::source2::archive::InstallRoot;
+
+    match root {
+        InstallRoot::WrapIntoFolder(name) => vec![name.clone()],
+        InstallRoot::PluginsDir => {
+            let mut folders = Vec::new();
+            for entry in entries {
+                if let Some(top) = entry.path.split('/').next()
+                    && !top.is_empty()
+                    && !folders.iter().any(|f: &String| f.eq_ignore_ascii_case(top))
+                {
+                    folders.push(top.to_string());
+                }
+            }
+            folders
+        }
+        InstallRoot::GameDir => {
+            const PLUGINS_PREFIX: &str = "addons/counterstrikesharp/plugins/";
+            let mut folders = Vec::new();
+            for entry in entries {
+                let lower = entry.path.to_ascii_lowercase();
+                if let Some(rest) = lower
+                    .starts_with(PLUGINS_PREFIX)
+                    .then(|| &entry.path[PLUGINS_PREFIX.len()..])
+                    && let Some(folder) = rest.split('/').next()
+                    && !folder.is_empty()
+                    && rest.contains('/')
+                    && !folders
+                        .iter()
+                        .any(|f: &String| f.eq_ignore_ascii_case(folder))
+                {
+                    folders.push(folder.to_string());
+                }
+            }
+            folders
+        }
+    }
+}
+
+/// Creates every missing ancestor of `file_abs` (the daemon's mk_dir is not
+/// guaranteed to be recursive). Already-known dirs are skipped via the set.
+fn ensure_parent_dirs<H: HostApi>(
+    host: &mut H,
+    node_id: u64,
+    file_abs: &str,
+    ensured: &mut std::collections::BTreeSet<String>,
+) -> Result<(), HostApiError> {
+    let Some(parent_end) = file_abs.rfind('/') else {
+        return Ok(());
+    };
+    let parent = &file_abs[..parent_end];
+    if ensured.contains(parent) {
+        return Ok(());
+    }
+    // Walk down from the shortest missing ancestor.
+    let mut prefixes: Vec<&str> = Vec::new();
+    let mut idx = parent.len();
+    loop {
+        let candidate = &parent[..idx];
+        if ensured.contains(candidate) || host.stat(node_id, candidate)?.is_some() {
+            break;
+        }
+        prefixes.push(candidate);
+        match candidate.rfind('/') {
+            Some(next) if next > 0 => idx = next,
+            _ => break,
+        }
+    }
+    for candidate in prefixes.into_iter().rev() {
+        host.mk_dir(node_id, candidate)?;
+        ensured.insert(candidate.to_string());
+    }
+    ensured.insert(parent.to_string());
+    Ok(())
 }
 
 /// Moves a directory via the daemon's native nodefs move, creating the

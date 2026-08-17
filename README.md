@@ -33,6 +33,24 @@ Since 0.2.0 the plugin also:
 - keeps an **audit history** of panel actions and shows a **restart banner**
   with a restart button whenever changes are waiting for one.
 
+And since 0.3.0:
+
+- **zip installs**: drop any release archive on the Upload dialog - the
+  layout (addons/-rooted, `Name/Name.dll`, loose dll) is detected and
+  unpacked to the right place, folders registered automatically;
+- **automatic safety snapshots** before platform installs, catalog installs,
+  zip installs and restores - every overwrite is reversible;
+- a **-usercon detector**: when RCON fails and the launch command lacks
+  `-usercon`, the hint says exactly that instead of a generic error;
+- an **Update all** button when several catalog plugins wear update badges;
+- a per-row **Reload** action (`css_plugins stop` + `load` in one click);
+- **JSON validation** in the config editor - a malformed config cannot be
+  saved - plus a Format button;
+- **log following** (auto-refresh) and a download link in the log viewer;
+- a **Doctor** dialog running every health check in one pass: launch
+  parameters, RCON, gameinfo wiring, duplicate folders, broken layouts,
+  manifest orphans, ambiguous .vdf aliases, leftover downloads.
+
 ## Credits
 
 This project is entirely based on
@@ -184,6 +202,8 @@ GET    /servers/{id}/snapshots           list snapshots
 POST   /servers/{id}/snapshots/restore   {name}
 DELETE /servers/{id}/snapshots           {name}
 GET    /servers/{id}/audit               recent panel actions
+POST   /servers/{id}/plugins/install-archive  {path, force?}  install uploaded zip
+GET    /servers/{id}/doctor              server-side health checks
 ```
 
 Beyond HTTP, the plugin exports two optional panel services: a

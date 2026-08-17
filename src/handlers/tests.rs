@@ -850,6 +850,167 @@ fn platform_install_rejects_unknown_kind() {
     assert_eq!(status, 400);
 }
 
+// ---------------------------------------------------------------- zip install
+
+#[test]
+fn archive_install_extracts_registers_and_cleans_up() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file("/srv/gameap/servers/cs2/upload/MatchZy.zip", &catalog_zip());
+
+    let (status, body) = body_json(crate::handlers::archive_install::handle(
+        &mut host,
+        &params("3"),
+        br#"{"path": "upload/MatchZy.zip"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["folders"][0], "MatchZy");
+    assert_eq!(body["files_written"], 1);
+    assert!(host
+        .file(&format!("{GAME}/addons/counterstrikesharp/plugins/MatchZy/MatchZy.dll"))
+        .is_some());
+    // Archive removed, manifest updated.
+    assert!(host.file("/srv/gameap/servers/cs2/upload/MatchZy.zip").is_none());
+    let manifest: Value =
+        serde_json::from_slice(host.file(MANIFEST_ABS).expect("manifest")).expect("json");
+    assert!(manifest["MatchZy"].is_object());
+}
+
+#[test]
+fn archive_install_conflicts_without_force() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    add_plugin(&mut host, "MatchZy");
+    host.add_file("/srv/gameap/servers/cs2/up.zip", &catalog_zip());
+
+    let (status, body) = body_json(crate::handlers::archive_install::handle(
+        &mut host,
+        &params("3"),
+        br#"{"path": "up.zip"}"#,
+        None,
+    ));
+    assert_eq!(status, 409);
+    assert_eq!(body["code"], "ALREADY_REGISTERED");
+
+    host.add_file("/srv/gameap/servers/cs2/up.zip", &catalog_zip());
+    let (status, _) = body_json(crate::handlers::archive_install::handle(
+        &mut host,
+        &params("3"),
+        br#"{"path": "up.zip", "force": true}"#,
+        None,
+    ));
+    assert_eq!(status, 200);
+}
+
+#[test]
+fn archive_install_rejects_escaping_paths() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    for path in ["../evil.zip", "/abs.zip", "a/../b.zip", "not-a-zip.rar"] {
+        let body = format!(r#"{{"path": "{path}"}}"#);
+        let (status, _) = body_json(crate::handlers::archive_install::handle(
+            &mut host,
+            &params("3"),
+            body.as_bytes(),
+            None,
+        ));
+        assert_eq!(status, 400, "{path} must be rejected");
+    }
+}
+
+// ---------------------------------------------------------------- auto snapshot
+
+#[test]
+fn catalog_install_snapshots_first() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    add_plugin(&mut host, "Existing");
+
+    let release = serde_json::json!({
+        "tag_name": "v1.0.0",
+        "html_url": "https://github.com/shobhit-pathak/MatchZy/releases/tag/v1.0.0",
+        "assets": [
+            {"name": "MatchZy-1.0.0.zip",
+             "browser_download_url": "https://example.com/mz.zip"}
+        ]
+    });
+    host.http_responses.insert(
+        "https://api.github.com/repos/shobhit-pathak/MatchZy/releases/latest".into(),
+        (200, serde_json::to_vec(&release).expect("json")),
+    );
+    host.http_responses
+        .insert("https://example.com/mz.zip".into(), (200, catalog_zip()));
+
+    let (status, _) = body_json(crate::handlers::catalog_routes::handle_install(
+        &mut host,
+        &params("3"),
+        br#"{"key": "matchzy"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200);
+    assert!(
+        host.execs.iter().any(|(cmd, _)| cmd.starts_with("tar -cf")),
+        "an automatic snapshot must run before the install"
+    );
+    let audit: Value =
+        serde_json::from_slice(host.storage.get("audit:3").expect("audit")).expect("json");
+    let actions: Vec<&str> = audit
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|entry| entry["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"snapshot-auto"));
+    assert!(actions.contains(&"catalog-install"));
+}
+
+// ---------------------------------------------------------------- doctor
+
+#[test]
+fn doctor_flags_duplicates_and_unwired_gameinfo() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_dir(&format!("{GAME}/addons/metamod"));
+    host.add_file(&format!("{GAME}/gameinfo.gi"), UNWIRED_GI);
+    add_plugin(&mut host, "MatchZy");
+    add_disabled_plugin(&mut host, "MatchZy");
+
+    let (status, body) = body_json(crate::handlers::doctor::handle(&mut host, &params("3")));
+    assert_eq!(status, 200);
+    let checks = body["checks"].as_array().expect("checks");
+    let by_id = |id: &str| {
+        checks
+            .iter()
+            .find(|c| c["id"] == id)
+            .unwrap_or_else(|| panic!("{id} check present"))
+    };
+    assert_eq!(by_id("gameinfo")["status"], "fail");
+    assert_eq!(by_id("duplicates")["status"], "fail");
+    assert_eq!(by_id("metamod")["status"], "ok");
+    assert_eq!(by_id("css")["status"], "ok");
+    assert_eq!(by_id("layout")["status"], "ok");
+}
+
+#[test]
+fn doctor_all_green_on_healthy_server() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_dir(&format!("{GAME}/addons/metamod"));
+    host.add_file(
+        &format!("{GAME}/gameinfo.gi"),
+        b"SearchPaths\n{\n\tGame\tcsgo/addons/metamod\n\tGame\tcsgo\n}\n",
+    );
+    add_plugin(&mut host, "MatchZy");
+
+    let (_, body) = body_json(crate::handlers::doctor::handle(&mut host, &params("3")));
+    let checks = body["checks"].as_array().expect("checks");
+    assert!(
+        checks.iter().all(|c| c["status"] == "ok"),
+        "expected all ok, got {body}"
+    );
+}
+
 // ---------------------------------------------------------------- audit route
 
 #[test]

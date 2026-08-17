@@ -11,7 +11,7 @@
                 v-if="!file"
                 :default-upload="false"
                 :show-file-list="false"
-                accept=".dll"
+                accept=".dll,.zip"
                 @change="onUploadChange"
             >
                 <n-upload-dragger>
@@ -108,7 +108,8 @@ import type { UploadFileInfo } from 'naive-ui';
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
 import { fmEnsureDirectory, fmUploadFile } from '../api/gameap';
-import { apiErrorMessage, registerPlugin } from '../api/plugin';
+import { apiErrorMessage, installArchive, registerPlugin } from '../api/plugin';
+import { httpStatus } from '../lib/http-error';
 import { fileExtension, fileStem, prettyName } from '../lib/naming';
 import type { StatePaths } from '../types';
 
@@ -146,14 +147,21 @@ const validationError = computed(() => {
     if (!file.value) {
         return null;
     }
-    return fileExtension(file.value.name) === 'dll' ? null : trans('wrong_type');
+    const extension = fileExtension(file.value.name);
+    return extension === 'dll' || extension === 'zip' ? null : trans('wrong_type');
 });
+
+const isZip = computed(() => Boolean(file.value) && fileExtension(file.value!.name) === 'zip');
 
 /** CounterStrikeSharp loads plugins/<Name>/<Name>.dll — the folder is the dll stem. */
 const folderName = computed(() => (file.value ? fileStem(file.value.name) : null));
 
-/** The picked file matches an already known plugin folder. */
+/** The picked dll matches an already known plugin folder. Zips learn this
+ * server-side (the backend answers 409 and we ask before retrying). */
 const isOverwrite = computed(() => {
+    if (isZip.value) {
+        return false;
+    }
     const name = folderName.value?.toLowerCase();
     if (!name) {
         return false;
@@ -162,7 +170,9 @@ const isOverwrite = computed(() => {
 });
 
 const targetPath = computed(() =>
-    `${props.paths.css_plugins_dir}/${folderName.value ?? '…'}/`,
+    isZip.value
+        ? `${props.paths.css_plugins_dir}/`
+        : `${props.paths.css_plugins_dir}/${folderName.value ?? '…'}/`,
 );
 
 const prettySize = computed(() => {
@@ -195,6 +205,10 @@ async function install(): Promise<void> {
     if (!picked || !name || validationError.value) {
         return;
     }
+    if (isZip.value) {
+        await installZip(picked);
+        return;
+    }
     const replaced = isOverwrite.value;
     uploading.value = true;
     progress.value = 0;
@@ -217,5 +231,62 @@ async function install(): Promise<void> {
     } finally {
         uploading.value = false;
     }
+}
+
+/** Zip flow: file-manager upload (no size squeeze), then the backend unpacks,
+ * detects the layout and registers whatever plugin folders it created. */
+async function installZip(picked: File): Promise<void> {
+    uploading.value = true;
+    progress.value = 0;
+    const archivePath = `${props.paths.css_dir}/${picked.name}`;
+    try {
+        await fmUploadFile(props.serverId, props.paths.css_dir, picked, (percent) => {
+            progress.value = percent;
+        });
+        await finishZipInstall(archivePath, false);
+    } catch (error) {
+        if (httpStatus(error) === 409) {
+            confirmZipOverwrite(archivePath, apiErrorMessage(error, ''));
+            return; // uploading is reset by the dialog path
+        }
+        window.$message?.error(apiErrorMessage(error, trans('op_failed')));
+        uploading.value = false;
+    }
+}
+
+function confirmZipOverwrite(archivePath: string, detail: string): void {
+    window.$dialog?.warning({
+        title: trans('overwrite_title'),
+        content: detail || trans('overwrite_text'),
+        positiveText: trans('overwrite'),
+        negativeText: trans('no'),
+        onPositiveClick: async () => {
+            try {
+                await finishZipInstall(archivePath, true);
+            } catch (error) {
+                window.$message?.error(apiErrorMessage(error, trans('op_failed')));
+                uploading.value = false;
+            }
+        },
+        onNegativeClick: () => {
+            uploading.value = false;
+        },
+        onClose: () => {
+            uploading.value = false;
+        },
+    });
+}
+
+async function finishZipInstall(archivePath: string, force: boolean): Promise<void> {
+    const result = await installArchive(props.pluginId, props.serverId, archivePath, force);
+    window.$message?.success(
+        trans('zip_installed_toast', {
+            folders: result.folders.join(', ') || trans('group_other'),
+            count: result.files_written,
+        }),
+    );
+    uploading.value = false;
+    emit('installed', force);
+    emit('update:show', false);
 }
 </script>

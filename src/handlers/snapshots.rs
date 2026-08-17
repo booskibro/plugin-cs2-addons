@@ -71,16 +71,23 @@ fn validate_name(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-pub fn handle_create<H: HostApi>(
-    host: &mut H,
-    params: &HashMap<String, String>,
-    actor: Option<&str>,
-) -> ApiResult {
-    let ctx = ServerCtx::resolve(host, params)?;
-    require_linux(&ctx)?;
-    super::require_css_installed(host, &ctx)?;
+pub(crate) struct CreatedSnapshot {
+    pub info: SnapshotInfo,
+    pub pruned: Vec<String>,
+}
 
-    let css = css_abs(&ctx);
+/// The snapshot core, shared by the explicit route and the automatic
+/// pre-operation snapshots. `protect` exempts one snapshot from retention
+/// pruning — the restore flow must never prune the snapshot it is about to
+/// restore.
+pub(crate) fn create_snapshot_now<H: HostApi>(
+    host: &mut H,
+    ctx: &ServerCtx,
+    protect: Option<&str>,
+) -> Result<CreatedSnapshot, ApiError> {
+    require_linux(ctx)?;
+
+    let css = css_abs(ctx);
     let members: Vec<&str> = {
         let mut present = Vec::new();
         for member in MEMBER_DIRS {
@@ -98,7 +105,7 @@ pub fn handle_create<H: HostApi>(
         ));
     }
 
-    let backups = backups_abs(&ctx);
+    let backups = backups_abs(ctx);
     if host.stat(ctx.node_id, &backups)?.is_none() {
         host.mk_dir(ctx.node_id, &backups)?;
     }
@@ -121,7 +128,10 @@ pub fn handle_create<H: HostApi>(
         .unwrap_or(0);
 
     // Retention: keep the newest KEEP_SNAPSHOTS, delete the rest.
-    let mut existing = list_snapshots(host, &ctx)?;
+    let mut existing: Vec<SnapshotInfo> = list_snapshots(host, ctx)?
+        .into_iter()
+        .filter(|snapshot| Some(snapshot.name.as_str()) != protect)
+        .collect();
     let mut pruned = Vec::new();
     while existing.len() > KEEP_SNAPSHOTS {
         let oldest = existing.pop().expect("len checked");
@@ -131,18 +141,58 @@ pub fn handle_create<H: HostApi>(
         }
     }
 
-    super::audit::record(host, ctx.server_id, actor, "snapshot-create", &name);
+    Ok(CreatedSnapshot {
+        info: SnapshotInfo {
+            created_at: parse_snapshot_ts(&file_name).unwrap_or_default(),
+            path: ctx.rel(&paths::join(source2::BACKUPS_DIR, &file_name)),
+            name,
+            size,
+        },
+        pruned,
+    })
+}
+
+/// Best-effort snapshot before a destructive operation. Skips quietly when
+/// there is nothing to protect (fresh server, non-linux node); logs and moves
+/// on when the snapshot itself fails — an update must never be blocked by its
+/// own safety net.
+pub(crate) fn try_auto_snapshot<H: HostApi>(
+    host: &mut H,
+    ctx: &ServerCtx,
+    actor: Option<&str>,
+    protect: Option<&str>,
+) -> Option<String> {
+    match create_snapshot_now(host, ctx, protect) {
+        Ok(created) => {
+            super::audit::record(host, ctx.server_id, actor, "snapshot-auto", &created.info.name);
+            Some(created.info.name)
+        }
+        Err(err) => {
+            host.log_info(&format!(
+                "auto-snapshot skipped for server {}: {}",
+                ctx.server_id, err.message
+            ));
+            None
+        }
+    }
+}
+
+pub fn handle_create<H: HostApi>(
+    host: &mut H,
+    params: &HashMap<String, String>,
+    actor: Option<&str>,
+) -> ApiResult {
+    let ctx = ServerCtx::resolve(host, params)?;
+    super::require_css_installed(host, &ctx)?;
+
+    let created = create_snapshot_now(host, &ctx, None)?;
+    super::audit::record(host, ctx.server_id, actor, "snapshot-create", &created.info.name);
 
     Ok(json_response(
         200,
         &SnapshotCreateResponse {
-            snapshot: SnapshotInfo {
-                created_at: parse_snapshot_ts(&file_name).unwrap_or_default(),
-                path: ctx.rel(&paths::join(source2::BACKUPS_DIR, &file_name)),
-                name,
-                size,
-            },
-            pruned,
+            snapshot: created.info,
+            pruned: created.pruned,
         },
     ))
 }
@@ -201,6 +251,10 @@ pub fn handle_restore<H: HostApi>(
     {
         return Err(ApiError::not_found("SNAPSHOT_NOT_FOUND", "snapshot not found"));
     }
+
+    // The pre-restore state gets its own automatic snapshot, so a restore is
+    // itself reversible. The target is protected from retention pruning.
+    try_auto_snapshot(host, &ctx, actor, Some(&request.name));
 
     // Wipe the live dirs so files deleted since the snapshot do not survive it.
     let css = css_abs(&ctx);

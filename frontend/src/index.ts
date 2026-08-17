@@ -7,7 +7,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
     // normalization (valid base32, a-z2-7): base32("cs2addon").
     id: 'mnzteylemrxw4',
     name: 'CS2 Addons',
-    version: '0.2.1',
+    version: '0.3.0',
     apiVersion: '1.0',
     description: 'Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers',
     author: 'BooskiBro (after gameap/plugin-goldsrc-addons by GameAP)',
@@ -120,8 +120,9 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             install_title: 'Install plugin — CounterStrikeSharp',
             drop_hint: 'Drop a file here or click to choose',
-            file_hint: 'A compiled plugin .dll is supported; the folder plugins/<Name>/ is created automatically. Multi-file plugins: unpack their zip via the file manager, then register with Upload.',
-            wrong_type: 'A .dll file is required',
+            file_hint: 'A compiled plugin .dll, or a whole release .zip - the archive layout is detected and unpacked to the right place automatically.',
+            wrong_type: 'A .dll or .zip file is required',
+            zip_installed_toast: 'Installed from archive: :folders (:count files)',
             auto_enable: 'Load after install',
             install: 'Install',
             uploading: 'Uploading…',
@@ -210,6 +211,46 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             audit_title: 'Recent panel actions',
             audit_empty: 'Nothing recorded yet',
+
+            rcon_usercon_missing:
+                'RCON cannot work: the launch parameters are missing -usercon. Add it in Launch Settings and restart.',
+
+            action_reload: 'Reload',
+            reloaded_ok: 'Plugin ":name" reloaded',
+            reload_failed: 'Failed to reload ":name"',
+
+            update_all: 'Update all (:count)',
+            update_all_title: 'Update :count plugins?',
+            update_all_text:
+                'Each plugin is reinstalled from its latest GitHub release. A snapshot is taken automatically first.',
+            update_all_done: 'Plugins updated: :count - restart or reload them',
+            update_all_partial: 'Updated :count, failed: :failed',
+
+            toolbar_doctor: 'Doctor',
+            doctor_title: 'Setup health check',
+            doctor_recheck: 'Re-check',
+            doctor_all_ok: 'Everything looks healthy',
+            doctor_summary: ':fails failed, :warns warnings',
+            doctor_usercon_ok: '-usercon is present in the launch parameters',
+            doctor_usercon_missing:
+                'The launch parameters are missing -usercon; RCON cannot work without it',
+            doctor_rcon_ok: 'Console reachable, live data flowing',
+            doctor_check_usercon: 'Launch parameters',
+            doctor_check_rcon: 'RCON console',
+            doctor_check_metamod: 'Metamod:Source',
+            doctor_check_gameinfo: 'gameinfo.gi wiring',
+            doctor_check_css: 'CounterStrikeSharp',
+            doctor_check_duplicates: 'Enabled/disabled conflicts',
+            doctor_check_layout: 'Plugin folder layout',
+            doctor_check_orphans: 'Manifest consistency',
+            doctor_check_vdf: 'Metamod plugin aliases',
+            doctor_check_scratch: 'Download leftovers',
+
+            config_format: 'Format',
+            config_invalid: 'Not valid JSON - saving is blocked: :error',
+
+            logs_follow: 'Follow',
+            logs_download: 'download',
         },
         ru: {
             tab_label: 'Плагины',
@@ -318,8 +359,9 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             install_title: 'Установка плагина — CounterStrikeSharp',
             drop_hint: 'Перетащите файл сюда или нажмите для выбора',
-            file_hint: 'Поддерживается скомпилированный .dll плагина; папка plugins/<Name>/ создаётся автоматически. Многофайловые плагины: распакуйте их zip через файловый менеджер и зарегистрируйте кнопкой «Загрузить».',
-            wrong_type: 'Нужен файл .dll',
+            file_hint: 'Скомпилированный .dll плагина или целый релизный .zip - раскладка архива определяется и распаковывается куда нужно автоматически.',
+            wrong_type: 'Нужен файл .dll или .zip',
+            zip_installed_toast: 'Установлено из архива: :folders (файлов: :count)',
             auto_enable: 'Загрузить после установки',
             install: 'Установить',
             uploading: 'Загрузка…',
@@ -408,6 +450,46 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             audit_title: 'Последние действия в панели',
             audit_empty: 'Пока ничего не записано',
+
+            rcon_usercon_missing:
+                'RCON не может работать: в параметрах запуска нет -usercon. Добавьте его в настройках запуска и перезапустите сервер.',
+
+            action_reload: 'Перезагрузить',
+            reloaded_ok: 'Плагин «:name» перезагружен',
+            reload_failed: 'Не удалось перезагрузить «:name»',
+
+            update_all: 'Обновить все (:count)',
+            update_all_title: 'Обновить плагины (:count)?',
+            update_all_text:
+                'Каждый плагин переустанавливается из последнего релиза на GitHub. Перед этим автоматически создаётся снапшот.',
+            update_all_done: 'Обновлено плагинов: :count - перезапустите или перезагрузите их',
+            update_all_partial: 'Обновлено: :count, не удалось: :failed',
+
+            toolbar_doctor: 'Диагностика',
+            doctor_title: 'Проверка состояния',
+            doctor_recheck: 'Проверить снова',
+            doctor_all_ok: 'Всё в порядке',
+            doctor_summary: 'ошибок: :fails, предупреждений: :warns',
+            doctor_usercon_ok: '-usercon есть в параметрах запуска',
+            doctor_usercon_missing:
+                'В параметрах запуска нет -usercon; без него RCON не работает',
+            doctor_rcon_ok: 'Консоль доступна, данные идут',
+            doctor_check_usercon: 'Параметры запуска',
+            doctor_check_rcon: 'Консоль RCON',
+            doctor_check_metamod: 'Metamod:Source',
+            doctor_check_gameinfo: 'Подключение в gameinfo.gi',
+            doctor_check_css: 'CounterStrikeSharp',
+            doctor_check_duplicates: 'Конфликты вкл/выкл',
+            doctor_check_layout: 'Структура папок плагинов',
+            doctor_check_orphans: 'Согласованность манифеста',
+            doctor_check_vdf: 'Алиасы плагинов Metamod',
+            doctor_check_scratch: 'Остатки загрузок',
+
+            config_format: 'Форматировать',
+            config_invalid: 'Некорректный JSON - сохранение заблокировано: :error',
+
+            logs_follow: 'Следить',
+            logs_download: 'скачать',
         },
     },
 

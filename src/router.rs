@@ -30,6 +30,8 @@ pub enum RouteId {
     SnapshotRestore,
     SnapshotDelete,
     Audit,
+    InstallArchive,
+    Doctor,
 }
 
 pub struct RouteDef {
@@ -148,6 +150,18 @@ pub const ROUTES: &[RouteDef] = &[
         pattern: "/servers/{id}/audit",
         description: "Recent plugin-management actions on this server",
     },
+    RouteDef {
+        id: RouteId::InstallArchive,
+        method: "POST",
+        pattern: "/servers/{id}/plugins/install-archive",
+        description: "Install a plugin from a zip uploaded via the file manager",
+    },
+    RouteDef {
+        id: RouteId::Doctor,
+        method: "GET",
+        pattern: "/servers/{id}/doctor",
+        description: "Server-side health checks for the addon setup",
+    },
 ];
 
 pub fn http_routes() -> Vec<pb::HttpRoute> {
@@ -230,6 +244,10 @@ pub fn dispatch<H: HostApi>(host: &mut H, req: &pb::HttpRequest) -> pb::HttpResp
             handlers::snapshots::handle_delete(host, &params, &req.body, actor)
         }
         RouteId::Audit => handlers::audit::handle(host, &params),
+        RouteId::InstallArchive => {
+            handlers::archive_install::handle(host, &params, &req.body, actor)
+        }
+        RouteId::Doctor => handlers::doctor::handle(host, &params),
     };
     result.unwrap_or_else(ApiError::into_response)
 }

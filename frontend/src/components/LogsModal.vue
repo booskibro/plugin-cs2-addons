@@ -17,6 +17,19 @@
             <GButton color="white" size="small" :disabled="loading" @click="refresh">
                 <GIcon name="refresh" /><span class="ml-1">{{ trans('retry') }}</span>
             </GButton>
+            <label class="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none">
+                <n-switch v-model:value="follow" size="small" />
+                {{ trans('logs_follow') }}
+            </label>
+            <a
+                v-if="file"
+                class="link !text-xs cursor-pointer"
+                :href="downloadHref"
+                target="_blank"
+                rel="noopener"
+            >
+                {{ trans('logs_download') }}
+            </a>
             <span v-if="file" class="ml-auto text-xs text-stone-400 dark:text-stone-500 font-mono truncate">
                 {{ file }}
             </span>
@@ -47,8 +60,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { NEmpty, NInput } from 'naive-ui';
+import { computed, onUnmounted, ref, watch } from 'vue';
+import { NEmpty, NInput, NSwitch } from 'naive-ui';
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
 import { apiErrorMessage, getLogs } from '../api/plugin';
@@ -71,6 +84,10 @@ const lines = ref<string[]>([]);
 const file = ref<string | null>(null);
 const filter = ref('');
 const loading = ref(false);
+const follow = ref(false);
+
+const FOLLOW_INTERVAL_MS = 4000;
+let followTimer: number | null = null;
 
 watch(
     () => props.show,
@@ -78,9 +95,45 @@ watch(
         if (shown) {
             filter.value = props.initialFilter;
             void refresh();
+        } else {
+            follow.value = false;
         }
     },
 );
+
+// Poll silently while following; refresh() sets loading and would flicker.
+watch(follow, (active) => {
+    if (active && followTimer === null) {
+        followTimer = window.setInterval(() => void poll(), FOLLOW_INTERVAL_MS);
+    } else if (!active && followTimer !== null) {
+        window.clearInterval(followTimer);
+        followTimer = null;
+    }
+});
+
+onUnmounted(() => {
+    if (followTimer !== null) {
+        window.clearInterval(followTimer);
+    }
+});
+
+async function poll(): Promise<void> {
+    try {
+        const response = await getLogs(props.pluginId, props.serverId);
+        lines.value = response.lines;
+        file.value = response.file;
+    } catch {
+        // Silent — the next tick retries; explicit refresh reports errors.
+    }
+}
+
+const downloadHref = computed(() => {
+    if (!file.value) {
+        return undefined;
+    }
+    const params = new URLSearchParams({ disk: 'server', path: file.value });
+    return `/api/file-manager/${props.serverId}/download?${params.toString()}`;
+});
 
 async function refresh(): Promise<void> {
     loading.value = true;

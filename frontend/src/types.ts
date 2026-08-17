@@ -169,6 +169,17 @@ export interface AuditEntry {
     subject: string;
 }
 
+export interface InstallArchiveResult {
+    folders: string[];
+    files_written: number;
+}
+
+export interface DoctorCheck {
+    id: string;
+    status: 'ok' | 'warn' | 'fail';
+    detail: string;
+}
+
 // Local mirror of the SDK's ServerData / ServerTabProps contract.
 //
 // Declared here rather than imported from @gameap/plugin-sdk so that

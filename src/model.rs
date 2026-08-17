@@ -287,6 +287,35 @@ pub struct SnapshotRestoreResponse {
     pub restored: bool,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct InstallArchiveRequest {
+    /// Server-dir-relative path of the uploaded .zip.
+    pub path: String,
+    /// Overwrite already-installed plugins instead of failing with 409.
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct InstallArchiveResponse {
+    /// CSS plugin folders the archive created/updated.
+    pub folders: Vec<String>,
+    pub files_written: u32,
+}
+
+#[derive(Serialize, Debug)]
+pub struct DoctorCheck {
+    pub id: String,
+    /// "ok" | "warn" | "fail".
+    pub status: String,
+    pub detail: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct DoctorResponse {
+    pub checks: Vec<DoctorCheck>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AuditEntry {
     /// Unix seconds.

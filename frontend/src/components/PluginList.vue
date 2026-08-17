@@ -67,7 +67,7 @@
                 :single-line="true"
                 :row-key="rowKey"
                 :row-class-name="rowClassName"
-                :scroll-x="840"
+                :scroll-x="950"
             >
                 <template #empty>
                     <n-empty :description="emptyText">
@@ -126,7 +126,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     toggle: [row: PluginRow, value: boolean];
-    'hot-action': [row: PluginRow, action: 'load' | 'unload'];
+    'hot-action': [row: PluginRow, action: 'load' | 'unload' | 'reload'];
     'set-comment': [row: PluginRow, text: string];
     remove: [row: PluginRow];
     bulk: [action: 'enable' | 'disable' | 'delete', rows: PluginRow[]];
@@ -580,7 +580,7 @@ const columns = computed<DataTableColumns<TableRow>>(() => {
             title: trans('col_actions'),
             key: 'actions',
             align: 'right',
-            width: 360,
+            width: 470,
             render(row: TableRow) {
                 if (isHeader(row)) {
                     return null;
@@ -592,6 +592,16 @@ const columns = computed<DataTableColumns<TableRow>>(() => {
                     buttons.push(
                         renderActionButton('white', 'fa-solid fa-gear', trans('action_config'), () =>
                             emit('configure', row),
+                        ),
+                    );
+                } else {
+                    buttons.push(spacer());
+                }
+                // Reload = stop + load in one go, for applying config changes.
+                if (row.status === 'running') {
+                    buttons.push(
+                        renderActionButton('white', 'fa-solid fa-rotate', trans('action_reload'), () =>
+                            emit('hot-action', row, 'reload'),
                         ),
                     );
                 } else {

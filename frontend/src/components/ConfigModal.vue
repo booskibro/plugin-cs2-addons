@@ -14,17 +14,30 @@
         </div>
 
         <Loading v-if="loading" />
-        <n-input
-            v-else
-            v-model:value="text"
-            type="textarea"
-            :rows="14"
-            class="font-mono"
-            placeholder="#"
-        />
+        <template v-else>
+            <n-input
+                v-model:value="text"
+                type="textarea"
+                :rows="14"
+                class="font-mono"
+                placeholder="#"
+            />
+            <n-alert v-if="jsonError" type="warning" :show-icon="true" class="mt-2">
+                {{ trans('config_invalid', { error: jsonError }) }}
+            </n-alert>
+        </template>
 
         <template #footer>
-            <GButton color="green" :disabled="loading || saving" @click="save">
+            <GButton
+                v-if="isJson"
+                color="white"
+                :disabled="loading || saving"
+                @click="formatJson"
+            >
+                <i class="fa-solid fa-align-left mr-1"></i>
+                {{ trans('config_format') }}
+            </GButton>
+            <GButton color="green" :disabled="loading || saving || Boolean(jsonError)" @click="save">
                 <GIcon name="save" class="mr-1" />
                 {{ trans('save') }}
             </GButton>
@@ -34,7 +47,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { NInput } from 'naive-ui';
+import { NAlert, NInput } from 'naive-ui';
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
 import { fmDownloadText, fmUploadFile } from '../api/gameap';
@@ -60,6 +73,29 @@ const saving = ref(false);
 const title = computed(() =>
     props.row ? trans('config_title', { name: props.row.name }) : trans('action_config'),
 );
+
+const isJson = computed(() => props.row?.configPath?.toLowerCase().endsWith('.json') ?? false);
+
+/** Live validation for .json configs — a malformed file silently kills the
+ * plugin on load, so a broken document cannot be saved here. */
+const jsonError = computed(() => {
+    if (!isJson.value || text.value.trim() === '') {
+        return null;
+    }
+    try {
+        JSON.parse(text.value);
+        return null;
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+});
+
+function formatJson(): void {
+    if (jsonError.value || text.value.trim() === '') {
+        return;
+    }
+    text.value = `${JSON.stringify(JSON.parse(text.value), null, 2)}\n`;
+}
 
 watch(
     () => props.show,

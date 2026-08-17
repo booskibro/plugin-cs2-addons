@@ -5,16 +5,16 @@
 //! are unpacked in-plugin, so nothing beyond the daemon is required on the
 //! node. Layout quirks are handled by `archive::detect_install_root`.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use crate::handlers::ctx::ServerCtx;
-use crate::host_api::{HostApi, HostApiError, HttpFetchParams};
+use crate::host_api::{HostApi, HttpFetchParams};
 use crate::http::{ApiError, ApiResult, json_response, parse_json_body};
 use crate::model::{
     CatalogEntryInfo, CatalogInstallRequest, CatalogInstallResponse, CatalogResponse,
 };
-use crate::source2::archive::{self, InstallRoot};
-use crate::source2::{catalog, paths};
+use crate::source2::archive;
+use crate::source2::catalog;
 
 const DOWNLOAD_TIMEOUT_SECONDS: i32 = 25;
 
@@ -82,7 +82,10 @@ pub fn handle_install<H: HostApi>(
     let root = archive::detect_install_root(&entries)
         .map_err(|err| ApiError::unprocessable("BAD_ARCHIVE", err))?;
 
-    let files_written = write_entries(host, &ctx, &entries, &root)?;
+    // Reinstalls overwrite the plugin folder — keep a way back.
+    super::snapshots::try_auto_snapshot(host, &ctx, actor, None);
+
+    let files_written = super::write_archive_entries(host, &ctx, &entries, &root)?;
 
     // Register like a manual upload would, so the row appears with metadata.
     let mut manifest = super::read_manifest(host, &ctx)?;
@@ -108,63 +111,3 @@ pub fn handle_install<H: HostApi>(
     ))
 }
 
-fn write_entries<H: HostApi>(
-    host: &mut H,
-    ctx: &ServerCtx,
-    entries: &[archive::ArchiveEntry],
-    root: &InstallRoot,
-) -> Result<u32, ApiError> {
-    let plugins_abs = super::css_plugins_abs(ctx);
-    let mut written = 0u32;
-    let mut ensured_dirs: BTreeSet<String> = BTreeSet::new();
-    for entry in entries {
-        let target_abs = match root {
-            InstallRoot::GameDir => paths::join(&ctx.game_abs, &entry.path),
-            InstallRoot::PluginsDir => paths::join(&plugins_abs, &entry.path),
-            InstallRoot::WrapIntoFolder(folder) => {
-                paths::join(&paths::join(&plugins_abs, folder), &entry.path)
-            }
-        };
-        ensure_parent_dirs(host, ctx.node_id, &target_abs, &mut ensured_dirs)?;
-        host.upload(ctx.node_id, &target_abs, &entry.data, entry.mode)?;
-        written += 1;
-    }
-    Ok(written)
-}
-
-/// Creates every missing ancestor of `file_abs` (the daemon's mk_dir is not
-/// guaranteed to be recursive). Already-known dirs are skipped via the set.
-fn ensure_parent_dirs<H: HostApi>(
-    host: &mut H,
-    node_id: u64,
-    file_abs: &str,
-    ensured: &mut BTreeSet<String>,
-) -> Result<(), HostApiError> {
-    let Some(parent_end) = file_abs.rfind('/') else {
-        return Ok(());
-    };
-    let parent = &file_abs[..parent_end];
-    if ensured.contains(parent) {
-        return Ok(());
-    }
-    // Walk down from the shortest missing ancestor.
-    let mut prefixes: Vec<&str> = Vec::new();
-    let mut idx = parent.len();
-    loop {
-        let candidate = &parent[..idx];
-        if ensured.contains(candidate) || host.stat(node_id, candidate)?.is_some() {
-            break;
-        }
-        prefixes.push(candidate);
-        match candidate.rfind('/') {
-            Some(next) if next > 0 => idx = next,
-            _ => break,
-        }
-    }
-    for candidate in prefixes.into_iter().rev() {
-        host.mk_dir(node_id, candidate)?;
-        ensured.insert(candidate.to_string());
-    }
-    ensured.insert(parent.to_string());
-    Ok(())
-}

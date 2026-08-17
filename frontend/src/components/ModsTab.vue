@@ -30,6 +30,16 @@
                         <span class="truncate">{{ rconHint || ' ' }}</span>
                     </div>
                     <div class="ml-auto flex flex-wrap items-center gap-1.5">
+                        <GButton
+                            v-if="updatableCatalog.length"
+                            color="orange"
+                            size="small"
+                            :disabled="mutating"
+                            @click="onUpdateAll"
+                        >
+                            <i class="fa-solid fa-arrow-up-from-bracket"></i>
+                            <span class="ml-1">{{ trans('update_all', { count: updatableCatalog.length }) }}</span>
+                        </GButton>
                         <GButton color="white" size="small" @click="catalogOpen = true">
                             <i class="fa-solid fa-shapes"></i>
                             <span class="ml-1 hidden sm:inline">{{ trans('toolbar_catalog') }}</span>
@@ -59,6 +69,10 @@
                         <GButton color="white" size="small" @click="auditOpen = true">
                             <i class="fa-solid fa-clock-rotate-left"></i>
                             <span class="ml-1 hidden sm:inline">{{ trans('toolbar_history') }}</span>
+                        </GButton>
+                        <GButton color="white" size="small" @click="doctorOpen = true">
+                            <i class="fa-solid fa-stethoscope"></i>
+                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_doctor') }}</span>
                         </GButton>
                     </div>
                 </div>
@@ -176,6 +190,12 @@
                     :server-id="serverId"
                     :plugin-id="pluginId"
                 />
+                <DoctorModal
+                    v-model:show="doctorOpen"
+                    :server-id="serverId"
+                    :plugin-id="pluginId"
+                    :frontend-checks="frontendChecks"
+                />
             </template>
         </template>
     </div>
@@ -190,6 +210,7 @@ import AdminsModal from './AdminsModal.vue';
 import AuditModal from './AuditModal.vue';
 import CatalogModal from './CatalogModal.vue';
 import ConfigModal from './ConfigModal.vue';
+import DoctorModal from './DoctorModal.vue';
 import InstallModal from './InstallModal.vue';
 import LogsModal from './LogsModal.vue';
 import PlatformCard from './PlatformCard.vue';
@@ -201,6 +222,7 @@ import {
     deletePlugin,
     getState,
     getUpdates,
+    installCatalogPlugin,
     installPlatform,
     repairGameinfo,
     restartServer,
@@ -218,6 +240,7 @@ import {
 import { prettyName } from '../lib/naming';
 import { computeRowStatus } from '../lib/status';
 import type {
+    DoctorCheck,
     PlatformVersion,
     PluginRow,
     PluginUpdateInfo,
@@ -259,6 +282,7 @@ const adminsOpen = ref(false);
 const logsOpen = ref(false);
 const logsFilter = ref('');
 const auditOpen = ref(false);
+const doctorOpen = ref(false);
 
 const updatesData = ref<UpdatesResponse | null>(null);
 const platformBusy = ref(false);
@@ -295,20 +319,33 @@ const nothingInstalled = computed(() => {
     return !metamodPresent && !state.value.css.installed;
 });
 
+/** The launch command visibly lacks -usercon: CS2 opens no RCON listener,
+ * making a connect-level failure a configuration problem with a known fix. */
+const userconMissing = computed(() => {
+    const command = props.server?.start_command ?? '';
+    return command.trim() !== '' && !command.includes('-usercon');
+});
+
 const rconHint = computed(() => {
     switch (rconAvailability.value) {
         case 'offline':
-            return trans('rcon_unavailable_offline');
+            return userconMissing.value
+                ? trans('rcon_usercon_missing')
+                : trans('rcon_unavailable_offline');
         case 'no-rcon':
             return trans('rcon_unavailable_norcon');
         case 'bad-password':
             return trans('rcon_unavailable_badpass');
         case 'empty':
             return trans('rcon_unavailable_empty');
-        case 'error':
+        case 'error': {
+            if (userconMissing.value) {
+                return trans('rcon_usercon_missing');
+            }
             return rconErrorDetail.value
                 ? `${trans('rcon_unavailable_error')} (${rconErrorDetail.value})`
                 : trans('rcon_unavailable_error');
+        }
         default:
             return null;
     }
@@ -325,6 +362,38 @@ const updatesByFolder = computed<Record<string, PluginUpdateInfo>>(() => {
         map[info.folder] = info;
     }
     return map;
+});
+
+/** Catalog plugins whose installed runtime version trails the latest release. */
+const updatableCatalog = computed<PluginUpdateInfo[]>(() =>
+    (updatesData.value?.plugins ?? []).filter((info) => {
+        const row = rows.value.find((item) => item.name === info.folder);
+        if (!row?.version) {
+            return false;
+        }
+        return row.version.replace(/^v/, '') !== info.version.replace(/^v/, '');
+    }),
+);
+
+/** Checks only the frontend can make; prepended to the backend doctor list. */
+const frontendChecks = computed<DoctorCheck[]>(() => {
+    const checks: DoctorCheck[] = [];
+    const command = props.server?.start_command ?? '';
+    if (command.trim() !== '') {
+        checks.push(
+            command.includes('-usercon')
+                ? { id: 'usercon', status: 'ok', detail: trans('doctor_usercon_ok') }
+                : { id: 'usercon', status: 'fail', detail: trans('doctor_usercon_missing') },
+        );
+    }
+    if (!serverOnline.value) {
+        checks.push({ id: 'rcon', status: 'warn', detail: trans('rcon_unavailable_offline') });
+    } else if (rconOk.value) {
+        checks.push({ id: 'rcon', status: 'ok', detail: trans('doctor_rcon_ok') });
+    } else if (rconAvailability.value !== 'unknown') {
+        checks.push({ id: 'rcon', status: 'fail', detail: rconHint.value ?? '' });
+    }
+    return checks;
 });
 
 /** A restart applies pending work: explicit toggles or rows awaiting load. */
@@ -449,18 +518,25 @@ async function onToggle(row: PluginRow, value: boolean): Promise<void> {
     }
 }
 
-/** Hot load/unload over RCON — the CS2 analogue of amxx pause/unpause. */
-async function onHotAction(row: PluginRow, action: 'load' | 'unload'): Promise<void> {
+/** Hot load/unload/reload over RCON — the CS2 analogue of amxx pause/unpause.
+ * Reload chains stop + load, the one-click way to apply a config change. */
+async function onHotAction(
+    row: PluginRow,
+    action: 'load' | 'unload' | 'reload',
+): Promise<void> {
     mutating.value = true;
     try {
-        const output =
-            action === 'unload'
-                ? await cssPluginsCommand(props.serverId, 'stop', row.runtime?.name ?? row.name)
-                : await cssPluginsCommand(
-                      props.serverId,
-                      'load',
-                      `${row.name}/${row.name}.dll`,
-                  );
+        let output = '';
+        if (action === 'unload' || action === 'reload') {
+            output = await cssPluginsCommand(props.serverId, 'stop', row.runtime?.name ?? row.name);
+        }
+        if (action === 'load' || action === 'reload') {
+            output = await cssPluginsCommand(
+                props.serverId,
+                'load',
+                `${row.name}/${row.name}.dll`,
+            );
+        }
         cssRuntime.value = parseCssPlugins(
             await rcon(props.serverId, 'css_plugins list'),
         );
@@ -469,15 +545,17 @@ async function onHotAction(row: PluginRow, action: 'load' | 'unload'): Promise<v
         const succeeded =
             action === 'unload' ? runtime?.status !== 'running' : runtime?.status === 'running';
         if (succeeded) {
-            toast('success', trans(action === 'unload' ? 'unloaded_ok' : 'loaded_ok', { name: row.displayName }));
+            const key =
+                action === 'unload' ? 'unloaded_ok' : action === 'reload' ? 'reloaded_ok' : 'loaded_ok';
+            toast('success', trans(key, { name: row.displayName }));
         } else {
-            toast(
-                'error',
-                output ||
-                    trans(action === 'unload' ? 'unload_failed' : 'load_failed_named', {
-                        name: row.displayName,
-                    }),
-            );
+            const key =
+                action === 'unload'
+                    ? 'unload_failed'
+                    : action === 'reload'
+                      ? 'reload_failed'
+                      : 'load_failed_named';
+            toast('error', output || trans(key, { name: row.displayName }));
         }
     } catch (error) {
         applyRconFailure(error);
@@ -684,6 +762,44 @@ function onRestart(): void {
 function openLogs(filter = ''): void {
     logsFilter.value = filter;
     logsOpen.value = true;
+}
+
+/** Reinstall every catalog plugin wearing an update badge, one by one. */
+function onUpdateAll(): void {
+    const targets = updatableCatalog.value;
+    if (targets.length === 0) {
+        return;
+    }
+    window.$dialog?.warning({
+        title: trans('update_all_title', { count: targets.length }),
+        content: trans('update_all_text'),
+        positiveText: trans('yes'),
+        negativeText: trans('no'),
+        onPositiveClick: async () => {
+            mutating.value = true;
+            let updated = 0;
+            const failed: string[] = [];
+            try {
+                for (const target of targets) {
+                    try {
+                        await installCatalogPlugin(props.pluginId, props.serverId, target.key);
+                        updated += 1;
+                    } catch {
+                        failed.push(target.folder);
+                    }
+                }
+            } finally {
+                mutating.value = false;
+            }
+            if (failed.length) {
+                toast('error', trans('update_all_partial', { count: updated, failed: failed.join(', ') }));
+            } else {
+                toast('success', trans('update_all_done', { count: updated }));
+            }
+            restartDirty.value = true;
+            await refreshAll();
+        },
+    });
 }
 
 function openConfig(row: PluginRow): void {
