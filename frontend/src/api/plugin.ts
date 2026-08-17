@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 
+import { asHttpError, httpBodyMessage } from '../lib/http-error';
 import type {
     AuditEntry,
     CatalogEntryInfo,
@@ -168,12 +169,9 @@ export async function getAudit(pluginId: string, serverId: number): Promise<Audi
 
 /** Human-oriented message from a backend error response. */
 export function apiErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        const data = error.response?.data as { message?: string } | undefined;
-        if (data?.message) {
-            return data.message;
-        }
-        return error.message;
+    const http = asHttpError(error);
+    if (http) {
+        return httpBodyMessage(error) ?? http.message ?? fallback;
     }
     return fallback;
 }

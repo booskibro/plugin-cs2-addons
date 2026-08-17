@@ -3,6 +3,7 @@
 
 import axios from 'axios';
 
+import { asHttpError, httpBodyMessage, httpStatus } from '../lib/http-error';
 import { isBadPasswordOutput } from '../lib/rcon-parse';
 
 export type RconFailure = 'offline' | 'no-rcon' | 'bad-password' | 'empty' | 'error';
@@ -53,7 +54,7 @@ function toRconError(error: unknown): RconError {
     if (error instanceof RconError) {
         return error;
     }
-    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const status = httpStatus(error);
     if (status === 503) {
         return new RconError('offline', 'server is offline');
     }
@@ -63,14 +64,14 @@ function toRconError(error: unknown): RconError {
     if (status === 422) {
         return new RconError('bad-password', 'rcon authentication failed');
     }
-    if (axios.isAxiosError(error)) {
+    const http = asHttpError(error);
+    if (http) {
         // The panel body's "message" says what actually broke (e.g. "failed to
-        // execute rcon command: response ID mismatch"); the axios message is
-        // only the HTTP status line.
-        const data = error.response?.data as { message?: string } | undefined;
-        return new RconError('error', data?.message ?? error.message);
+        // execute rcon command: response ID mismatch"); the transport message
+        // is only the HTTP status line.
+        return new RconError('error', httpBodyMessage(error) ?? http.message ?? 'request failed');
     }
-    return new RconError('error', String(error));
+    return new RconError('error', error instanceof Error ? error.message : String(error));
 }
 
 /** POST /api/file-manager/{id}/update-file — multipart write into a directory. */
@@ -116,7 +117,8 @@ export async function fmEnsureDirectory(
             name,
         });
     } catch (error) {
-        if (axios.isAxiosError(error) && error.response && error.response.status < 500) {
+        const status = httpStatus(error);
+        if (status !== undefined && status < 500) {
             return; // directory already exists
         }
         throw error;
