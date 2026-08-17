@@ -7,7 +7,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
     // normalization (valid base32, a-z2-7): base32("cs2addon").
     id: 'mnzteylemrxw4',
     name: 'CS2 Addons',
-    version: '0.1.0',
+    version: '0.2.0',
     apiVersion: '1.0',
     description: 'Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers',
     author: 'BooskiBro (after gameap/plugin-goldsrc-addons by GameAP)',
@@ -135,6 +135,81 @@ export const cs2AddonsPlugin: PluginDefinition = {
             save: 'Save',
             config_saved: 'Configuration saved',
             config_load_failed: 'Failed to load the config',
+
+            toolbar_catalog: 'Catalog',
+            toolbar_snapshots: 'Snapshots',
+            toolbar_admins: 'Admins',
+            toolbar_logs: 'Logs',
+            toolbar_history: 'History',
+
+            update_available: 'v:version available',
+            update_available_hint: 'A newer release is available upstream',
+
+            repair_gameinfo: 'Fix gameinfo.gi',
+            gameinfo_repaired: 'gameinfo.gi patched - the Metamod search path is back',
+            gameinfo_already_ok: 'gameinfo.gi already loads Metamod - nothing to fix',
+
+            vdf_plugins: 'Metamod plugins',
+            vdf_hint: 'Toggling renames the .vdf; applies on the next restart.',
+            vdf_enabled: 'Metamod plugin ":name" enabled - applies after restart',
+            vdf_disabled: 'Metamod plugin ":name" disabled - applies after restart',
+
+            platform_install: 'Install latest',
+            platform_installing: 'Installing…',
+            platform_update: 'Update to v:version',
+            platform_install_title: 'Install :name?',
+            platform_install_text:
+                'The latest release is downloaded and unpacked on the server (existing files are overwritten). This can take a minute.',
+            platform_installed: ':name :version installed - restart the server to load it',
+
+            restart_pending: 'Changes are waiting for a server restart to take effect.',
+            restart_now: 'Restart server',
+            restart_title: 'Restart the server?',
+            restart_text: 'Players online will be disconnected.',
+            restart_sent: 'Restart requested',
+
+            catalog_title: 'Plugin catalog',
+            catalog_installed: 'installed',
+            catalog_installing: 'Installing…',
+            catalog_reinstall: 'Reinstall',
+            catalog_hint:
+                'Installs the latest GitHub release. Multi-server configs and databases still need per-plugin setup - check each project page.',
+            catalog_installed_toast: ':name :version installed - load it or restart the server',
+
+            snapshots_title: 'Plugin setup snapshots',
+            snapshot_create: 'Create snapshot',
+            snapshots_retention: 'plugins/ + configs are archived; the 5 newest are kept.',
+            snapshots_empty: 'No snapshots yet',
+            snapshot_download: 'download',
+            snapshot_restore: 'Restore',
+            snapshot_created: 'Snapshot created',
+            snapshot_restore_title: 'Restore this snapshot?',
+            snapshot_restore_text:
+                'Plugins and configs are replaced with the state from :date. Files added since then are removed.',
+            snapshot_restored: 'Snapshot restored - restart the server to apply',
+            snapshots_transfer_hint:
+                'To copy a setup between servers: download a snapshot here, upload the .tar into the other server’s backups folder via its file manager, then restore it there.',
+
+            admins_title: 'CounterStrikeSharp admins',
+            admins_tab_admins: 'Admins',
+            admins_tab_groups: 'Groups (raw JSON)',
+            admins_col_name: 'Name',
+            admins_col_identity: 'SteamID64',
+            admins_col_flags: 'Flags',
+            admins_col_immunity: 'Immunity',
+            admins_add: 'Add admin',
+            admins_hint:
+                'Flags are comma-separated (e.g. @css/generic, @css/ban). Changes apply on map change or css_admins_reload.',
+            admins_parse_failed: 'admins.json could not be parsed - fix it via the file manager',
+            admins_groups_invalid: 'admin_groups.json is not valid JSON: :error',
+            admins_saved: 'Admin configuration saved',
+
+            logs_title: 'CounterStrikeSharp log',
+            logs_filter_placeholder: 'Filter lines (plugin name, "error"…)',
+            logs_empty: 'No log lines - the server has not written a CSS log yet',
+
+            audit_title: 'Recent panel actions',
+            audit_empty: 'Nothing recorded yet',
         },
         ru: {
             tab_label: 'Плагины',
@@ -258,6 +333,81 @@ export const cs2AddonsPlugin: PluginDefinition = {
             save: 'Сохранить',
             config_saved: 'Конфигурация сохранена',
             config_load_failed: 'Не удалось загрузить конфиг',
+
+            toolbar_catalog: 'Каталог',
+            toolbar_snapshots: 'Снапшоты',
+            toolbar_admins: 'Админы',
+            toolbar_logs: 'Логи',
+            toolbar_history: 'История',
+
+            update_available: 'доступна v:version',
+            update_available_hint: 'Вышла более новая версия',
+
+            repair_gameinfo: 'Починить gameinfo.gi',
+            gameinfo_repaired: 'gameinfo.gi исправлен - путь Metamod возвращён',
+            gameinfo_already_ok: 'gameinfo.gi уже загружает Metamod - чинить нечего',
+
+            vdf_plugins: 'Плагины Metamod',
+            vdf_hint: 'Переключение переименовывает .vdf; применится после перезапуска.',
+            vdf_enabled: 'Metamod-плагин «:name» включён - применится после перезапуска',
+            vdf_disabled: 'Metamod-плагин «:name» выключен - применится после перезапуска',
+
+            platform_install: 'Установить последнюю',
+            platform_installing: 'Установка…',
+            platform_update: 'Обновить до v:version',
+            platform_install_title: 'Установить :name?',
+            platform_install_text:
+                'Последний релиз будет скачан и распакован на сервере (существующие файлы перезаписываются). Это может занять минуту.',
+            platform_installed: ':name :version установлен - перезапустите сервер',
+
+            restart_pending: 'Изменения ждут перезапуска сервера.',
+            restart_now: 'Перезапустить',
+            restart_title: 'Перезапустить сервер?',
+            restart_text: 'Игроки на сервере будут отключены.',
+            restart_sent: 'Перезапуск запрошен',
+
+            catalog_title: 'Каталог плагинов',
+            catalog_installed: 'установлен',
+            catalog_installing: 'Установка…',
+            catalog_reinstall: 'Переустановить',
+            catalog_hint:
+                'Устанавливается последний релиз с GitHub. Базы данных и сложные конфиги настраиваются отдельно - смотрите страницу проекта.',
+            catalog_installed_toast: ':name :version установлен - загрузите его или перезапустите сервер',
+
+            snapshots_title: 'Снапшоты набора плагинов',
+            snapshot_create: 'Создать снапшот',
+            snapshots_retention: 'Архивируются plugins/ и конфиги; хранятся 5 последних.',
+            snapshots_empty: 'Снапшотов пока нет',
+            snapshot_download: 'скачать',
+            snapshot_restore: 'Восстановить',
+            snapshot_created: 'Снапшот создан',
+            snapshot_restore_title: 'Восстановить этот снапшот?',
+            snapshot_restore_text:
+                'Плагины и конфиги будут заменены состоянием от :date. Файлы, добавленные позже, будут удалены.',
+            snapshot_restored: 'Снапшот восстановлен - перезапустите сервер',
+            snapshots_transfer_hint:
+                'Чтобы перенести набор на другой сервер: скачайте снапшот, загрузите .tar в папку backups другого сервера через его файловый менеджер и восстановите там.',
+
+            admins_title: 'Админы CounterStrikeSharp',
+            admins_tab_admins: 'Админы',
+            admins_tab_groups: 'Группы (JSON)',
+            admins_col_name: 'Имя',
+            admins_col_identity: 'SteamID64',
+            admins_col_flags: 'Флаги',
+            admins_col_immunity: 'Иммунитет',
+            admins_add: 'Добавить админа',
+            admins_hint:
+                'Флаги через запятую (например @css/generic, @css/ban). Применяется на смене карты или по css_admins_reload.',
+            admins_parse_failed: 'admins.json не разбирается - исправьте его через файловый менеджер',
+            admins_groups_invalid: 'admin_groups.json - некорректный JSON: :error',
+            admins_saved: 'Настройки админов сохранены',
+
+            logs_title: 'Лог CounterStrikeSharp',
+            logs_filter_placeholder: 'Фильтр строк (имя плагина, «error»…)',
+            logs_empty: 'Строк нет - сервер ещё не писал лог CSS',
+
+            audit_title: 'Последние действия в панели',
+            audit_empty: 'Пока ничего не записано',
         },
     },
 

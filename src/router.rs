@@ -17,6 +17,19 @@ pub enum RouteId {
     SetAttributes,
     AddPlugin,
     RemovePlugin,
+    RepairGameinfo,
+    MetamodToggle,
+    Logs,
+    Restart,
+    Updates,
+    CatalogList,
+    CatalogInstall,
+    PlatformInstall,
+    SnapshotCreate,
+    SnapshotList,
+    SnapshotRestore,
+    SnapshotDelete,
+    Audit,
 }
 
 pub struct RouteDef {
@@ -56,6 +69,84 @@ pub const ROUTES: &[RouteDef] = &[
         method: "DELETE",
         pattern: "/servers/{id}/plugins",
         description: "Delete a plugin folder and its plugins_meta.json entry",
+    },
+    RouteDef {
+        id: RouteId::RepairGameinfo,
+        method: "POST",
+        pattern: "/servers/{id}/gameinfo/repair",
+        description: "Re-add the Metamod search path to gameinfo.gi",
+    },
+    RouteDef {
+        id: RouteId::MetamodToggle,
+        method: "POST",
+        pattern: "/servers/{id}/metamod/toggle",
+        description: "Enable or disable a Metamod plugin by renaming its .vdf",
+    },
+    RouteDef {
+        id: RouteId::Logs,
+        method: "GET",
+        pattern: "/servers/{id}/logs",
+        description: "Tail of the newest CounterStrikeSharp log file",
+    },
+    RouteDef {
+        id: RouteId::Restart,
+        method: "POST",
+        pattern: "/servers/{id}/restart",
+        description: "Restart the game server to apply pending plugin changes",
+    },
+    RouteDef {
+        id: RouteId::Updates,
+        method: "GET",
+        pattern: "/servers/{id}/updates",
+        description: "Latest upstream versions of the platforms and catalog plugins",
+    },
+    RouteDef {
+        id: RouteId::CatalogList,
+        method: "GET",
+        pattern: "/servers/{id}/catalog",
+        description: "Curated catalog of installable CounterStrikeSharp plugins",
+    },
+    RouteDef {
+        id: RouteId::CatalogInstall,
+        method: "POST",
+        pattern: "/servers/{id}/catalog/install",
+        description: "Install a catalog plugin from its latest GitHub release",
+    },
+    RouteDef {
+        id: RouteId::PlatformInstall,
+        method: "POST",
+        pattern: "/servers/{id}/platform/install",
+        description: "Install or update Metamod:Source / CounterStrikeSharp",
+    },
+    RouteDef {
+        id: RouteId::SnapshotCreate,
+        method: "POST",
+        pattern: "/servers/{id}/snapshots",
+        description: "Snapshot plugins/ and configs/plugins/ into a tarball",
+    },
+    RouteDef {
+        id: RouteId::SnapshotList,
+        method: "GET",
+        pattern: "/servers/{id}/snapshots",
+        description: "List plugin setup snapshots",
+    },
+    RouteDef {
+        id: RouteId::SnapshotRestore,
+        method: "POST",
+        pattern: "/servers/{id}/snapshots/restore",
+        description: "Restore a plugin setup snapshot",
+    },
+    RouteDef {
+        id: RouteId::SnapshotDelete,
+        method: "DELETE",
+        pattern: "/servers/{id}/snapshots",
+        description: "Delete a plugin setup snapshot",
+    },
+    RouteDef {
+        id: RouteId::Audit,
+        method: "GET",
+        pattern: "/servers/{id}/audit",
+        description: "Recent plugin-management actions on this server",
     },
 ];
 
@@ -102,14 +193,43 @@ pub fn dispatch<H: HostApi>(host: &mut H, req: &pb::HttpRequest) -> pb::HttpResp
     let Some((route, params)) = match_route(&req.method, &req.path) else {
         return ApiError::not_found("NOT_FOUND", "route not found").into_response();
     };
+    // Audit identity: prefer the display name, fall back to the login.
+    let actor_owned = req.session.as_ref().and_then(|session| {
+        session.user.as_ref().map(|user| {
+            user.name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| user.login.clone())
+        })
+    });
+    let actor = actor_owned.as_deref();
     let result: ApiResult = match route {
         RouteId::State => handlers::state::handle(host, &params),
-        RouteId::TogglePlugin => handlers::toggle::handle(host, &params, &req.body),
+        RouteId::TogglePlugin => handlers::toggle::handle(host, &params, &req.body, actor),
         RouteId::SetAttributes => handlers::attributes::handle(host, &params, &req.body),
-        RouteId::AddPlugin => handlers::add::handle(host, &params, &req.body),
+        RouteId::AddPlugin => handlers::add::handle(host, &params, &req.body, actor),
         RouteId::RemovePlugin => {
-            handlers::remove::handle(host, &params, &req.body, &req.query_params)
+            handlers::remove::handle(host, &params, &req.body, &req.query_params, actor)
         }
+        RouteId::RepairGameinfo => handlers::repair::handle(host, &params, actor),
+        RouteId::MetamodToggle => handlers::metamod::handle(host, &params, &req.body, actor),
+        RouteId::Logs => handlers::logs::handle(host, &params),
+        RouteId::Restart => handlers::restart::handle(host, &params, actor),
+        RouteId::Updates => handlers::updates::handle(host, &params, &req.query_params),
+        RouteId::CatalogList => handlers::catalog_routes::handle_list(host, &params),
+        RouteId::CatalogInstall => {
+            handlers::catalog_routes::handle_install(host, &params, &req.body, actor)
+        }
+        RouteId::PlatformInstall => handlers::platform::handle(host, &params, &req.body, actor),
+        RouteId::SnapshotCreate => handlers::snapshots::handle_create(host, &params, actor),
+        RouteId::SnapshotList => handlers::snapshots::handle_list(host, &params),
+        RouteId::SnapshotRestore => {
+            handlers::snapshots::handle_restore(host, &params, &req.body, actor)
+        }
+        RouteId::SnapshotDelete => {
+            handlers::snapshots::handle_delete(host, &params, &req.body, actor)
+        }
+        RouteId::Audit => handlers::audit::handle(host, &params),
     };
     result.unwrap_or_else(ApiError::into_response)
 }

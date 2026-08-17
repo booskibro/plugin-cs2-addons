@@ -22,10 +22,16 @@ export interface CssPluginEntry {
     group_title: string | null;
 }
 
+export interface MetamodPluginEntry {
+    name: string;
+    enabled: boolean;
+}
+
 export interface MetamodState {
     installed: boolean;
     dir_present: boolean;
     gameinfo_wired: boolean;
+    plugins: MetamodPluginEntry[];
 }
 
 export interface CssState {
@@ -93,6 +99,75 @@ export type RowStatus =
     | 'pending'
     | 'error'
     | 'missing';
+
+// New-feature DTOs (updates, catalog, snapshots, logs, audit).
+
+export interface PlatformRelease {
+    version: string;
+    download_url: string;
+}
+
+export interface PluginUpdateInfo {
+    key: string;
+    /** CSS plugin folder name the release belongs to. */
+    folder: string;
+    version: string;
+    release_url: string;
+}
+
+export interface UpdatesResponse {
+    fetched_at: number;
+    stale: boolean;
+    metamod: PlatformRelease | null;
+    css: PlatformRelease | null;
+    plugins: PluginUpdateInfo[];
+}
+
+export interface CatalogEntryInfo {
+    key: string;
+    name: string;
+    description: string;
+    homepage: string;
+    folder: string;
+}
+
+export interface CatalogInstallResult {
+    key: string;
+    folder: string;
+    version: string;
+    files_written: number;
+}
+
+export interface PlatformInstallResult {
+    kind: string;
+    version: string;
+    gameinfo_patched: boolean;
+}
+
+export interface SnapshotInfo {
+    name: string;
+    created_at: number;
+    size: number;
+    /** Server-dir-relative path, usable with the file-manager download. */
+    path: string;
+}
+
+export interface SnapshotCreateResult {
+    snapshot: SnapshotInfo;
+    pruned: string[];
+}
+
+export interface LogsResponse {
+    file: string | null;
+    lines: string[];
+}
+
+export interface AuditEntry {
+    ts: number;
+    user: string;
+    action: string;
+    subject: string;
+}
 
 // Local mirror of the SDK's ServerData / ServerTabProps contract.
 //

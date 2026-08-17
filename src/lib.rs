@@ -14,9 +14,12 @@
 pub mod handlers;
 pub mod host_api;
 pub mod http;
+pub mod maintenance;
 pub mod model;
+pub mod rcon;
 pub mod router;
 pub mod source2;
+pub mod wasm_ext;
 
 use gameap_plugin_sdk::proto::gameap::plugin as pb;
 use gameap_plugin_sdk::{Plugin, PluginError, register_plugin};
@@ -63,6 +66,8 @@ impl<H: HostApi> Plugin for Cs2Addons<H> {
         _req: pb::InitializeRequest,
     ) -> Result<pb::InitializeResponse, PluginError> {
         self.host.log_info("cs2-addons plugin initialized");
+        #[cfg(target_arch = "wasm32")]
+        crate::wasm_ext::register_scheduled_tasks();
         Ok(pb::InitializeResponse {
             result: Some(gameap_plugin_sdk::ok_result()),
         })

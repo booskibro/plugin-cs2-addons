@@ -113,13 +113,15 @@ import {
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
 import { hotActionForStatus } from '../lib/status';
-import type { PluginRow, RowStatus } from '../types';
+import type { PluginRow, PluginUpdateInfo, RowStatus } from '../types';
 
 const props = defineProps<{
     rows: PluginRow[];
     installed: boolean;
     pluginsPath: string;
     busy: boolean;
+    /** Latest known releases, keyed by plugin folder name. */
+    updates?: Record<string, PluginUpdateInfo>;
 }>();
 
 const emit = defineEmits<{
@@ -282,6 +284,17 @@ function saveComment(row: PluginRow): void {
 }
 
 // --- render helpers ---
+
+/** Release newer than the installed row's runtime version, if known. */
+function updateFor(row: PluginRow): PluginUpdateInfo | null {
+    const update = props.updates?.[row.name];
+    if (!update || !row.version) {
+        return null;
+    }
+    const current = row.version.replace(/^v/, '');
+    const latest = update.version.replace(/^v/, '');
+    return current !== latest ? update : null;
+}
 
 function statusMeta(row: PluginRow): { cls: string; text: string } {
     const map: Record<RowStatus, { cls: string; key: string }> = {
@@ -522,12 +535,28 @@ const columns = computed<DataTableColumns<TableRow>>(() => {
                         row.version ? `v${row.version}` : '—',
                     ),
                 ];
+                const update = updateFor(row);
+                if (update) {
+                    lines.push(
+                        h(
+                            'a',
+                            {
+                                class: 'badge-orange !me-0 text-[10px] cursor-pointer no-underline',
+                                href: update.release_url || undefined,
+                                target: '_blank',
+                                rel: 'noopener',
+                                title: trans('update_available_hint'),
+                            },
+                            trans('update_available', { version: update.version }),
+                        ),
+                    );
+                }
                 if (row.author) {
                     lines.push(
                         h('span', { class: 'text-xs text-stone-500 dark:text-stone-400' }, row.author),
                     );
                 }
-                return h('div', { class: 'flex flex-col leading-tight' }, lines);
+                return h('div', { class: 'flex flex-col leading-tight items-start' }, lines);
             },
         },
         {

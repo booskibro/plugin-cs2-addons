@@ -14,6 +14,7 @@ pub fn handle<H: HostApi>(
     params: &HashMap<String, String>,
     body: &[u8],
     query_params: &HashMap<String, pb::QueryParamValues>,
+    actor: Option<&str>,
 ) -> ApiResult {
     let context = ServerCtx::resolve(host, params)?;
 
@@ -57,6 +58,8 @@ pub fn handle<H: HostApi>(
     if entry_removed {
         super::write_manifest(host, &context, &manifest)?;
     }
+
+    super::audit::record(host, context.server_id, actor, "plugin-delete", &name);
 
     Ok(json_response(
         200,

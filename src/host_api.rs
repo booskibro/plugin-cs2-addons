@@ -50,6 +50,26 @@ pub struct FileStat {
     pub permissions: u32,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct HttpFetchParams {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub timeout_seconds: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct HttpFetchResult {
+    pub status: i32,
+    pub body: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecResult {
+    pub exit_code: i32,
+    pub output: String,
+}
+
 pub trait HostApi {
     fn get_server(&mut self, id: u64) -> HostResult<Option<ServerInfo>>;
     fn get_game(&mut self, code: &str) -> HostResult<Option<GameInfo>>;
@@ -70,6 +90,18 @@ pub trait HostApi {
     fn move_path(&mut self, node_id: u64, source: &str, destination: &str) -> HostResult<()>;
     fn log_info(&mut self, message: &str);
     fn log_error(&mut self, message: &str);
+
+    /// Outbound HTTP through the panel (SSRF policy applies; responses are
+    /// capped at 10MB by the host — anything bigger must go through `exec`).
+    fn http_fetch(&mut self, params: &HttpFetchParams) -> HostResult<HttpFetchResult>;
+    /// Run a command on the node. The daemon shellquote-splits and execs it
+    /// directly — there is NO shell, so no pipes, no `&&`, no redirection.
+    fn exec(&mut self, node_id: u64, command: &str, work_dir: Option<&str>) -> HostResult<ExecResult>;
+    fn restart_server(&mut self, server_id: u64) -> HostResult<()>;
+    /// All servers of a game code (for scheduled maintenance sweeps).
+    fn find_servers_by_game(&mut self, game_code: &str) -> HostResult<Vec<ServerInfo>>;
+    fn storage_get(&mut self, key: &str) -> HostResult<Option<Vec<u8>>>;
+    fn storage_set(&mut self, key: &str, payload: &[u8]) -> HostResult<()>;
 }
 
 pub struct WasmHost;
@@ -97,6 +129,19 @@ pub mod mock {
         /// move_path calls, in call order.
         pub moves: Vec<(String, String)>,
         pub logs: Vec<String>,
+        /// url → response for http_fetch; unknown urls error.
+        pub http_responses: BTreeMap<String, (i32, Vec<u8>)>,
+        /// http_fetch calls, in call order (urls).
+        pub http_calls: Vec<String>,
+        /// command prefix → scripted result for exec; unmatched commands
+        /// succeed with exit 0 and empty output.
+        pub exec_results: BTreeMap<String, (i32, String)>,
+        /// exec calls, in call order: (command, work_dir).
+        pub execs: Vec<(String, Option<String>)>,
+        /// restart_server calls, in call order.
+        pub restarts: Vec<u64>,
+        /// Plugin key-value storage.
+        pub storage: BTreeMap<String, Vec<u8>>,
     }
 
     impl MockHost {
@@ -323,13 +368,66 @@ pub mod mock {
         fn log_error(&mut self, message: &str) {
             self.logs.push(format!("ERROR {message}"));
         }
+
+        fn http_fetch(&mut self, params: &HttpFetchParams) -> HostResult<HttpFetchResult> {
+            self.http_calls.push(params.url.clone());
+            match self.http_responses.get(&params.url) {
+                Some((status, body)) => Ok(HttpFetchResult {
+                    status: *status,
+                    body: body.clone(),
+                }),
+                None => Err(HostApiError::Op(format!("no response scripted for {}", params.url))),
+            }
+        }
+
+        fn exec(
+            &mut self,
+            _node_id: u64,
+            command: &str,
+            work_dir: Option<&str>,
+        ) -> HostResult<ExecResult> {
+            self.execs
+                .push((command.to_string(), work_dir.map(str::to_string)));
+            let scripted = self
+                .exec_results
+                .iter()
+                .find(|(prefix, _)| command.starts_with(prefix.as_str()))
+                .map(|(_, result)| result.clone());
+            let (exit_code, output) = scripted.unwrap_or((0, String::new()));
+            Ok(ExecResult { exit_code, output })
+        }
+
+        fn restart_server(&mut self, server_id: u64) -> HostResult<()> {
+            self.restarts.push(server_id);
+            Ok(())
+        }
+
+        fn find_servers_by_game(&mut self, game_code: &str) -> HostResult<Vec<ServerInfo>> {
+            Ok(self
+                .servers
+                .values()
+                .filter(|s| s.game_code.eq_ignore_ascii_case(game_code))
+                .cloned()
+                .collect())
+        }
+
+        fn storage_get(&mut self, key: &str) -> HostResult<Option<Vec<u8>>> {
+            Ok(self.storage.get(key).cloned())
+        }
+
+        fn storage_set(&mut self, key: &str, payload: &[u8]) -> HostResult<()> {
+            self.storage.insert(key.to_string(), payload.to_vec());
+            Ok(())
+        }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
     use gameap_plugin_sdk::host;
-    use gameap_plugin_sdk::proto::gameap::plugin::sdk::{games, nodefs, nodes, servers};
+    use gameap_plugin_sdk::proto::gameap::plugin::sdk::{
+        games, http, nodecmd, nodefs, nodes, servercontrol, servers, storage,
+    };
 
     use super::*;
 
@@ -504,6 +602,104 @@ mod wasm {
 
         fn log_error(&mut self, message: &str) {
             host::log::error(message);
+        }
+
+        fn http_fetch(&mut self, params: &HttpFetchParams) -> HostResult<HttpFetchResult> {
+            let resp = host::http::fetch(&http::HttpFetchRequest {
+                method: params.method.clone(),
+                url: params.url.clone(),
+                headers: params.headers.iter().cloned().collect(),
+                body: None,
+                timeout_seconds: params.timeout_seconds,
+            })
+            .map_err(call_err)?;
+            if let Some(err) = resp.error {
+                return Err(HostApiError::Op(err));
+            }
+            Ok(HttpFetchResult {
+                status: resp.status_code,
+                body: resp.body,
+            })
+        }
+
+        fn exec(
+            &mut self,
+            node_id: u64,
+            command: &str,
+            work_dir: Option<&str>,
+        ) -> HostResult<ExecResult> {
+            let resp = host::nodecmd::execute_command(&nodecmd::ExecuteCommandRequest {
+                node_id,
+                command: command.to_owned(),
+                work_dir: work_dir.map(str::to_owned),
+            })
+            .map_err(call_err)?;
+            if let Some(err) = resp.error {
+                return Err(HostApiError::Op(err));
+            }
+            Ok(ExecResult {
+                exit_code: resp.exit_code,
+                output: resp.output,
+            })
+        }
+
+        fn restart_server(&mut self, server_id: u64) -> HostResult<()> {
+            let resp = host::servercontrol::restart_server(&servercontrol::ServerControlRequest {
+                server_id,
+            })
+            .map_err(call_err)?;
+            if resp.success {
+                Ok(())
+            } else {
+                Err(HostApiError::Op(resp.error.unwrap_or_default()))
+            }
+        }
+
+        fn find_servers_by_game(&mut self, game_code: &str) -> HostResult<Vec<ServerInfo>> {
+            let resp = host::servers::find_servers(&servers::FindServersRequest {
+                filter: Some(servers::ServerFilter {
+                    game_ids: vec![game_code.to_owned()],
+                    ..Default::default()
+                }),
+                sorting: Vec::new(),
+                pagination: None,
+            })
+            .map_err(call_err)?;
+            Ok(resp
+                .servers
+                .into_iter()
+                .map(|s| ServerInfo {
+                    id: s.id,
+                    game_code: s.game_id,
+                    node_id: s.ds_id,
+                    dir: s.dir,
+                })
+                .collect())
+        }
+
+        fn storage_get(&mut self, key: &str) -> HostResult<Option<Vec<u8>>> {
+            let resp = host::storage::get(&storage::StorageGetRequest {
+                key: key.to_owned(),
+                entity_type: None,
+                entity_id: None,
+            })
+            .map_err(call_err)?;
+            Ok(resp.found.then_some(resp.payload).flatten())
+        }
+
+        fn storage_set(&mut self, key: &str, payload: &[u8]) -> HostResult<()> {
+            let resp = host::storage::set(&storage::StorageSetRequest {
+                key: key.to_owned(),
+                entity_type: None,
+                entity_id: None,
+                payload: payload.to_vec(),
+            })
+            .map_err(call_err)?;
+            if resp.success {
+                Ok(())
+            } else {
+                Err(HostApiError::Op(resp.error.unwrap_or_default()))
+            }
         }
     }
 }

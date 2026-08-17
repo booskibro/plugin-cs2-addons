@@ -20,15 +20,60 @@
             </n-card>
 
             <template v-else-if="state">
-                <!-- rcon hint: always rendered to reserve its height — removing it
-                     from the layout shifts the content below (visibility keeps the
-                     box; nbsp keeps the text line height when there is no hint) -->
+                <!-- rcon hint (left, height always reserved) + management toolbar -->
+                <div class="mb-1 flex flex-wrap items-center gap-2">
+                    <div
+                        class="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500 min-w-0"
+                        :style="{ visibility: rconHint ? 'visible' : 'hidden' }"
+                    >
+                        <GIcon name="info" size="sm" />
+                        <span class="truncate">{{ rconHint || ' ' }}</span>
+                    </div>
+                    <div class="ml-auto flex flex-wrap items-center gap-1.5">
+                        <GButton color="white" size="small" @click="catalogOpen = true">
+                            <i class="fa-solid fa-shapes"></i>
+                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_catalog') }}</span>
+                        </GButton>
+                        <GButton color="white" size="small" @click="snapshotsOpen = true">
+                            <i class="fa-solid fa-box-archive"></i>
+                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_snapshots') }}</span>
+                        </GButton>
+                        <GButton
+                            v-if="state.css.installed"
+                            color="white"
+                            size="small"
+                            @click="adminsOpen = true"
+                        >
+                            <i class="fa-solid fa-user-shield"></i>
+                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_admins') }}</span>
+                        </GButton>
+                        <GButton
+                            v-if="state.css.installed"
+                            color="white"
+                            size="small"
+                            @click="openLogs()"
+                        >
+                            <i class="fa-solid fa-file-waveform"></i>
+                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_logs') }}</span>
+                        </GButton>
+                        <GButton color="white" size="small" @click="auditOpen = true">
+                            <i class="fa-solid fa-clock-rotate-left"></i>
+                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_history') }}</span>
+                        </GButton>
+                    </div>
+                </div>
+
+                <!-- pending changes want a restart -->
                 <div
-                    class="mb-1 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500"
-                    :style="{ visibility: rconHint ? 'visible' : 'hidden' }"
+                    v-if="restartSuggested"
+                    class="mb-2 flex items-center gap-3 px-3 py-2 rounded border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950 text-sm text-orange-800 dark:text-orange-200"
                 >
-                    <GIcon name="info" size="sm" />
-                    <span>{{ rconHint || ' ' }}</span>
+                    <i class="fa-solid fa-rotate"></i>
+                    <span class="min-w-0 flex-1">{{ trans('restart_pending') }}</span>
+                    <GButton color="white" size="small" :disabled="mutating" @click="onRestart">
+                        <i class="fa-solid fa-power-off"></i>
+                        <span class="ml-1">{{ trans('restart_now') }}</span>
+                    </GButton>
                 </div>
 
                 <!-- platform status cards; only CounterStrikeSharp carries the list -->
@@ -38,13 +83,21 @@
                         :state="state"
                         :version="metaVersion"
                         :rows="[]"
+                        :update-version="metamodLatest"
+                        :busy="platformBusy"
+                        @install="onPlatformInstall('metamod')"
+                        @repair="onRepair"
+                        @toggle-vdf="onToggleVdf"
                     />
                     <PlatformCard
                         kind="css"
                         :state="state"
                         :version="cssVersion"
                         :rows="rows"
+                        :update-version="cssLatest"
+                        :busy="platformBusy"
                         active
+                        @install="onPlatformInstall('css')"
                     />
                 </div>
 
@@ -68,6 +121,7 @@
                             :installed="state.css.installed"
                             :plugins-path="state.paths.css_plugins_dir"
                             :busy="mutating"
+                            :updates="updatesByFolder"
                             @toggle="onToggle"
                             @hot-action="onHotAction"
                             @set-comment="onSetComment"
@@ -93,6 +147,35 @@
                     :server-id="serverId"
                     :row="configRow"
                 />
+                <CatalogModal
+                    v-model:show="catalogOpen"
+                    :server-id="serverId"
+                    :plugin-id="pluginId"
+                    :installed-folders="rows.map((row) => row.name)"
+                    @installed="onCatalogInstalled"
+                />
+                <SnapshotsModal
+                    v-model:show="snapshotsOpen"
+                    :server-id="serverId"
+                    :plugin-id="pluginId"
+                    @restored="onSnapshotRestored"
+                />
+                <AdminsModal
+                    v-model:show="adminsOpen"
+                    :server-id="serverId"
+                    :css-dir="state.paths.css_dir"
+                />
+                <LogsModal
+                    v-model:show="logsOpen"
+                    :server-id="serverId"
+                    :plugin-id="pluginId"
+                    :initial-filter="logsFilter"
+                />
+                <AuditModal
+                    v-model:show="auditOpen"
+                    :server-id="serverId"
+                    :plugin-id="pluginId"
+                />
             </template>
         </template>
     </div>
@@ -103,12 +186,28 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { NCard, NEmpty } from 'naive-ui';
 import { providePluginTrans } from '@gameap/plugin-sdk';
 
+import AdminsModal from './AdminsModal.vue';
+import AuditModal from './AuditModal.vue';
+import CatalogModal from './CatalogModal.vue';
 import ConfigModal from './ConfigModal.vue';
 import InstallModal from './InstallModal.vue';
+import LogsModal from './LogsModal.vue';
 import PlatformCard from './PlatformCard.vue';
 import PluginList from './PluginList.vue';
+import SnapshotsModal from './SnapshotsModal.vue';
 import { RconError, cssPluginsCommand, rcon } from '../api/gameap';
-import { apiErrorMessage, deletePlugin, getState, setAttributes, togglePlugin } from '../api/plugin';
+import {
+    apiErrorMessage,
+    deletePlugin,
+    getState,
+    getUpdates,
+    installPlatform,
+    repairGameinfo,
+    restartServer,
+    setAttributes,
+    toggleMetamodPlugin,
+    togglePlugin,
+} from '../api/plugin';
 import {
     cssVersionFromMetaList,
     matchRuntimeToFolders,
@@ -121,9 +220,11 @@ import { computeRowStatus } from '../lib/status';
 import type {
     PlatformVersion,
     PluginRow,
+    PluginUpdateInfo,
     RuntimePluginInfo,
     ServerTabProps,
     StateResponse,
+    UpdatesResponse,
 } from '../types';
 
 const props = defineProps<ServerTabProps>();
@@ -143,6 +244,8 @@ type RconAvailability =
     | 'empty'
     | 'error';
 const rconAvailability = ref<RconAvailability>('unknown');
+// Backend explanation for the generic 'error' reason, shown next to the hint.
+const rconErrorDetail = ref<string | null>(null);
 const metaVersion = ref<PlatformVersion | null>(null);
 const cssVersion = ref<PlatformVersion | null>(null);
 const cssRuntime = ref<RuntimePluginInfo[]>([]);
@@ -150,6 +253,17 @@ const cssRuntime = ref<RuntimePluginInfo[]>([]);
 const installOpen = ref(false);
 const configOpen = ref(false);
 const configRow = ref<PluginRow | null>(null);
+const catalogOpen = ref(false);
+const snapshotsOpen = ref(false);
+const adminsOpen = ref(false);
+const logsOpen = ref(false);
+const logsFilter = ref('');
+const auditOpen = ref(false);
+
+const updatesData = ref<UpdatesResponse | null>(null);
+const platformBusy = ref(false);
+/** A toggle happened since the last restart — the change waits for one. */
+const restartDirty = ref(false);
 
 const serverGame = computed(() => {
     return (
@@ -192,13 +306,33 @@ const rconHint = computed(() => {
         case 'empty':
             return trans('rcon_unavailable_empty');
         case 'error':
-            return trans('rcon_unavailable_error');
+            return rconErrorDetail.value
+                ? `${trans('rcon_unavailable_error')} (${rconErrorDetail.value})`
+                : trans('rcon_unavailable_error');
         default:
             return null;
     }
 });
 
 const rconOk = computed(() => rconAvailability.value === 'ok');
+
+const metamodLatest = computed(() => updatesData.value?.metamod?.version ?? null);
+const cssLatest = computed(() => updatesData.value?.css?.version ?? null);
+
+const updatesByFolder = computed<Record<string, PluginUpdateInfo>>(() => {
+    const map: Record<string, PluginUpdateInfo> = {};
+    for (const info of updatesData.value?.plugins ?? []) {
+        map[info.folder] = info;
+    }
+    return map;
+});
+
+/** A restart applies pending work: explicit toggles or rows awaiting load. */
+const restartSuggested = computed(
+    () =>
+        serverOnline.value &&
+        (restartDirty.value || rows.value.some((row) => row.status === 'pending')),
+);
 
 const rows = computed<PluginRow[]>(() => {
     if (!state.value) {
@@ -275,14 +409,26 @@ async function refreshRcon(): Promise<void> {
 
 /** Mark the console unavailable after a failed RCON call and drop runtime data. */
 function applyRconFailure(error: unknown): void {
-    rconAvailability.value = error instanceof RconError ? error.reason : 'error';
+    const reason = error instanceof RconError ? error.reason : 'error';
+    rconAvailability.value = reason;
+    rconErrorDetail.value =
+        reason === 'error' && error instanceof Error ? error.message : null;
     metaVersion.value = null;
     cssVersion.value = null;
     cssRuntime.value = [];
 }
 
 async function refreshAll(): Promise<void> {
-    await Promise.all([refreshState(), refreshRcon()]);
+    await Promise.all([refreshState(), refreshRcon(), refreshUpdates()]);
+}
+
+/** Update info is an enhancement — its failure never blocks the tab. */
+async function refreshUpdates(): Promise<void> {
+    try {
+        updatesData.value = await getUpdates(props.pluginId, props.serverId);
+    } catch {
+        updatesData.value = null;
+    }
 }
 
 function toast(type: 'success' | 'error' | 'info', text: string): void {
@@ -293,6 +439,7 @@ async function onToggle(row: PluginRow, value: boolean): Promise<void> {
     mutating.value = true;
     try {
         await togglePlugin(props.pluginId, props.serverId, row.name, value);
+        restartDirty.value = true;
         toast('success', trans(value ? 'toggled_on' : 'toggled_off', { name: row.displayName }));
         await refreshState();
     } catch (error) {
@@ -397,6 +544,7 @@ async function applyBulkToggle(bulkRows: PluginRow[], value: boolean): Promise<v
             changed += 1;
         }
         if (changed > 0) {
+            restartDirty.value = true;
             toast('success', trans(value ? 'bulk_enabled' : 'bulk_disabled', { count: changed }));
             await refreshState();
         }
@@ -443,6 +591,99 @@ function onBulk(action: 'enable' | 'disable' | 'delete', bulkRows: PluginRow[]):
 
 async function onInstalled(): Promise<void> {
     await refreshState();
+}
+
+async function onCatalogInstalled(): Promise<void> {
+    restartDirty.value = true;
+    await refreshState();
+}
+
+async function onSnapshotRestored(): Promise<void> {
+    restartDirty.value = true;
+    snapshotsOpen.value = false;
+    await refreshState();
+}
+
+async function onRepair(): Promise<void> {
+    mutating.value = true;
+    try {
+        const changed = await repairGameinfo(props.pluginId, props.serverId);
+        toast('success', trans(changed ? 'gameinfo_repaired' : 'gameinfo_already_ok'));
+        restartDirty.value = restartDirty.value || changed;
+        await refreshState();
+    } catch (error) {
+        toast('error', apiErrorMessage(error, trans('op_failed')));
+    } finally {
+        mutating.value = false;
+    }
+}
+
+async function onToggleVdf(name: string, enabled: boolean): Promise<void> {
+    mutating.value = true;
+    try {
+        await toggleMetamodPlugin(props.pluginId, props.serverId, name, enabled);
+        restartDirty.value = true;
+        toast('success', trans(enabled ? 'vdf_enabled' : 'vdf_disabled', { name }));
+        await refreshState();
+    } catch (error) {
+        toast('error', apiErrorMessage(error, trans('op_failed')));
+    } finally {
+        mutating.value = false;
+    }
+}
+
+function onPlatformInstall(kind: 'metamod' | 'css'): void {
+    const name = kind === 'metamod' ? 'Metamod:Source' : 'CounterStrikeSharp';
+    window.$dialog?.warning({
+        title: trans('platform_install_title', { name }),
+        content: trans('platform_install_text', { name }),
+        positiveText: trans('yes'),
+        negativeText: trans('no'),
+        onPositiveClick: async () => {
+            platformBusy.value = true;
+            try {
+                const result = await installPlatform(props.pluginId, props.serverId, kind);
+                toast(
+                    'success',
+                    trans('platform_installed', { name, version: result.version }),
+                );
+                restartDirty.value = true;
+                await refreshAll();
+            } catch (error) {
+                toast('error', apiErrorMessage(error, trans('op_failed')));
+            } finally {
+                platformBusy.value = false;
+            }
+        },
+    });
+}
+
+function onRestart(): void {
+    window.$dialog?.warning({
+        title: trans('restart_title'),
+        content: trans('restart_text'),
+        positiveText: trans('yes'),
+        negativeText: trans('no'),
+        onPositiveClick: async () => {
+            mutating.value = true;
+            try {
+                await restartServer(props.pluginId, props.serverId);
+                restartDirty.value = false;
+                toast('success', trans('restart_sent'));
+                // Give the server a moment to come back before re-querying.
+                window.setTimeout(() => void refreshAll(), 5000);
+            } catch (error) {
+                toast('error', apiErrorMessage(error, trans('op_failed')));
+            } finally {
+                mutating.value = false;
+            }
+        },
+    });
+}
+
+function openLogs(filter = ''): void {
+    logsFilter.value = filter;
+    logsOpen.value = true;
 }
 
 function openConfig(row: PluginRow): void {

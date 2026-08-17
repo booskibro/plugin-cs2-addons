@@ -1,6 +1,6 @@
 {
   "name": "cs2-addons-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GameAP CS2 Addons plugin frontend (Metamod:Source / CounterStrikeSharp)",
   "type": "module",
   "main": "./dist/plugin.js",

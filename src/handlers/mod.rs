@@ -1,9 +1,18 @@
 pub mod add;
 pub mod attributes;
+pub mod audit;
+pub mod catalog_routes;
 pub mod ctx;
+pub mod logs;
+pub mod metamod;
+pub mod platform;
 pub mod remove;
+pub mod repair;
+pub mod restart;
+pub mod snapshots;
 pub mod state;
 pub mod toggle;
+pub mod updates;
 
 #[cfg(test)]
 mod tests;
@@ -15,6 +24,15 @@ use crate::source2::{self, manifest::Manifest, paths};
 use ctx::ServerCtx;
 
 const MANIFEST_FILE_PERMISSIONS: u32 = 0o644;
+
+/// Unix seconds. wasm32-wasip1 backs this with the WASI clock; native tests
+/// use the OS clock.
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 /// Absolute path of the CounterStrikeSharp plugins dir.
 pub fn css_plugins_abs(ctx: &ServerCtx) -> String {

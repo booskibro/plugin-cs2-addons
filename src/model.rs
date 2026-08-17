@@ -57,6 +57,16 @@ pub struct MetamodState {
     pub dir_present: bool,
     /// gameinfo.gi contains the csgo/addons/metamod search path.
     pub gameinfo_wired: bool,
+    /// Binary Metamod plugins registered via addons/metamod/*.vdf.
+    pub plugins: Vec<MetamodPluginEntry>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct MetamodPluginEntry {
+    /// VDF file stem, e.g. "counterstrikesharp" for counterstrikesharp.vdf.
+    pub name: String,
+    /// The .vdf is live (not renamed to .vdf.disabled).
+    pub enabled: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -126,4 +136,167 @@ pub struct SetAttributesResponse {
     pub comment: Option<String>,
     pub group: Option<String>,
     pub changed: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RepairGameinfoResponse {
+    /// False when gameinfo.gi was already wired and nothing was written.
+    pub changed: bool,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MetamodToggleRequest {
+    /// VDF stem inside addons/metamod (no extension).
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct MetamodToggleResponse {
+    pub name: String,
+    pub enabled: bool,
+    pub changed: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct LogsResponse {
+    /// Server-dir-relative path of the log file that was read, if any.
+    pub file: Option<String>,
+    pub lines: Vec<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RestartResponse {
+    pub restarted: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct UpdatesCache {
+    /// Unix seconds of the last successful refresh.
+    pub fetched_at: u64,
+    pub metamod: Option<PlatformRelease>,
+    pub css: Option<PlatformRelease>,
+    /// Catalog key → latest known release.
+    pub plugins: std::collections::BTreeMap<String, PluginRelease>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlatformRelease {
+    pub version: String,
+    pub download_url: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PluginRelease {
+    pub version: String,
+    pub release_url: String,
+    pub download_url: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct UpdatesResponse {
+    pub fetched_at: u64,
+    pub stale: bool,
+    pub metamod: Option<PlatformRelease>,
+    pub css: Option<PlatformRelease>,
+    /// Catalog entries with their latest release, keyed for row matching:
+    /// entry.folder is the CSS plugin folder name the release belongs to.
+    pub plugins: Vec<PluginUpdateInfo>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PluginUpdateInfo {
+    pub key: String,
+    pub folder: String,
+    pub version: String,
+    pub release_url: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CatalogResponse {
+    pub entries: Vec<CatalogEntryInfo>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CatalogEntryInfo {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub homepage: String,
+    /// CSS plugin folder the install creates (row identity after install).
+    pub folder: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CatalogInstallRequest {
+    pub key: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CatalogInstallResponse {
+    pub key: String,
+    pub folder: String,
+    pub version: String,
+    pub files_written: u32,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PlatformInstallRequest {
+    /// "metamod" or "css".
+    pub kind: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PlatformInstallResponse {
+    pub kind: String,
+    pub version: String,
+    /// True when gameinfo.gi was patched as part of the install.
+    pub gameinfo_patched: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SnapshotInfo {
+    pub name: String,
+    /// Unix seconds parsed from the snapshot name.
+    pub created_at: u64,
+    pub size: u64,
+    /// Server-dir-relative path (for file-manager download).
+    pub path: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SnapshotListResponse {
+    pub snapshots: Vec<SnapshotInfo>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SnapshotNameRequest {
+    pub name: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SnapshotCreateResponse {
+    pub snapshot: SnapshotInfo,
+    /// Older snapshots deleted to honor the retention cap.
+    pub pruned: Vec<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SnapshotRestoreResponse {
+    pub name: String,
+    pub restored: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AuditEntry {
+    /// Unix seconds.
+    pub ts: u64,
+    pub user: String,
+    pub action: String,
+    pub subject: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct AuditResponse {
+    pub entries: Vec<AuditEntry>,
 }

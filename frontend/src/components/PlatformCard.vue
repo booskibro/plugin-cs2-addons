@@ -24,6 +24,14 @@
                         status="error"
                         :text="trans('status_not_installed')"
                     />
+                    <n-tooltip v-if="updateAvailable" trigger="hover">
+                        <template #trigger>
+                            <span class="badge-orange !me-0 text-[10px]">
+                                {{ trans('update_available', { version: updateVersion ?? '' }) }}
+                            </span>
+                        </template>
+                        {{ trans('update_available_hint') }}
+                    </n-tooltip>
                 </div>
                 <div
                     v-if="installed || notActive"
@@ -44,6 +52,31 @@
             </div>
             <div v-else class="mt-3 text-sm text-stone-600 dark:text-stone-300">
                 {{ trans('metamod_desc') }}
+            </div>
+
+            <!-- Binary Metamod plugins (.vdf aliases) -->
+            <div v-if="metamodPlugins.length" class="mt-3 flex flex-col gap-1">
+                <div class="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500">
+                    {{ trans('vdf_plugins') }}
+                </div>
+                <div
+                    v-for="plugin in metamodPlugins"
+                    :key="`${plugin.name}:${plugin.enabled}`"
+                    class="flex items-center gap-2 text-sm"
+                >
+                    <n-switch
+                        size="small"
+                        :value="plugin.enabled"
+                        :disabled="busy"
+                        @update:value="(value: boolean) => $emit('toggle-vdf', plugin.name, value)"
+                    />
+                    <span class="font-mono text-xs text-stone-700 dark:text-stone-200">
+                        {{ plugin.name }}
+                    </span>
+                </div>
+                <div class="text-[11px] text-stone-400 dark:text-stone-500">
+                    {{ trans('vdf_hint') }}
+                </div>
             </div>
         </template>
 
@@ -68,15 +101,50 @@
                 {{ trans('install_hint_css') }}
             </div>
         </template>
+
+        <!-- platform actions -->
+        <div v-if="showActions" class="mt-3 flex flex-wrap gap-2">
+            <GButton
+                v-if="isMetamod && notActive"
+                color="green"
+                size="small"
+                :disabled="busy"
+                @click="$emit('repair')"
+            >
+                <i class="fa-solid fa-wrench"></i><span class="ml-1">{{ trans('repair_gameinfo') }}</span>
+            </GButton>
+            <GButton
+                v-if="!installed && !notActive"
+                color="green"
+                size="small"
+                :disabled="busy"
+                @click="$emit('install')"
+            >
+                <i class="fa-solid fa-download"></i>
+                <span class="ml-1">{{ trans(busy ? 'platform_installing' : 'platform_install') }}</span>
+            </GButton>
+            <GButton
+                v-else-if="updateAvailable"
+                color="white"
+                size="small"
+                :disabled="busy"
+                @click="$emit('install')"
+            >
+                <i class="fa-solid fa-download"></i>
+                <span class="ml-1">
+                    {{ trans(busy ? 'platform_installing' : 'platform_update', { version: updateVersion ?? '' }) }}
+                </span>
+            </GButton>
+        </div>
     </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { NCard, NTooltip } from 'naive-ui';
+import { NCard, NSwitch, NTooltip } from 'naive-ui';
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
-import type { PlatformVersion, PluginRow, StateResponse } from '../types';
+import type { MetamodPluginEntry, PlatformVersion, PluginRow, StateResponse } from '../types';
 
 const props = defineProps<{
     kind: 'metamod' | 'css';
@@ -84,6 +152,16 @@ const props = defineProps<{
     version: PlatformVersion | null;
     rows: PluginRow[];
     active?: boolean;
+    /** Latest upstream version, when known. */
+    updateVersion?: string | null;
+    metamodPlugins?: MetamodPluginEntry[];
+    busy?: boolean;
+}>();
+
+defineEmits<{
+    install: [];
+    repair: [];
+    'toggle-vdf': [name: string, enabled: boolean];
 }>();
 
 const { trans } = usePluginTrans();
@@ -97,6 +175,24 @@ const installed = computed(() =>
 /** Metamod addons dir exists, but gameinfo.gi does not load it. */
 const notActive = computed(
     () => isMetamod.value && !props.state.metamod.installed && props.state.metamod.dir_present,
+);
+
+const metamodPlugins = computed<MetamodPluginEntry[]>(() =>
+    isMetamod.value ? (props.metamodPlugins ?? props.state.metamod.plugins ?? []) : [],
+);
+
+/** Known runtime version differs from the known latest → update offer. */
+const updateAvailable = computed(() => {
+    if (!props.updateVersion || !props.version || !installed.value) {
+        return false;
+    }
+    const current = props.version.version.replace(/^v/, '');
+    const latest = props.updateVersion.replace(/^v/, '');
+    return current !== latest;
+});
+
+const showActions = computed(
+    () => notActive.value || !installed.value || updateAvailable.value,
 );
 
 const title = computed(() => {

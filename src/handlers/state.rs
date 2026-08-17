@@ -5,8 +5,10 @@ use std::collections::HashMap;
 use crate::handlers::ctx::ServerCtx;
 use crate::host_api::HostApi;
 use crate::http::{ApiResult, json_response};
-use crate::model::{CssPluginEntry, CssState, MetamodState, StatePaths, StateResponse};
-use crate::source2::{self, gameinfo, paths};
+use crate::model::{
+    CssPluginEntry, CssState, MetamodPluginEntry, MetamodState, StatePaths, StateResponse,
+};
+use crate::source2::{self, gameinfo, paths, vdf};
 
 pub fn handle<H: HostApi>(host: &mut H, params: &HashMap<String, String>) -> ApiResult {
     let ctx = ServerCtx::resolve(host, params)?;
@@ -119,6 +121,13 @@ pub fn handle<H: HostApi>(host: &mut H, params: &HashMap<String, String>) -> Api
             installed: dir_present && gameinfo_wired,
             dir_present,
             gameinfo_wired,
+            plugins: vdf::list(host, ctx.node_id, &metamod_abs)?
+                .into_iter()
+                .map(|plugin| MetamodPluginEntry {
+                    name: plugin.name,
+                    enabled: plugin.enabled,
+                })
+                .collect(),
         },
         css: CssState {
             installed: css_installed,

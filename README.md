@@ -6,6 +6,33 @@ Counter-Strike 2 servers for managing **Metamod:Source** and
 persistently, hot load/unload without a restart, edit per-plugin comments,
 group plugins, upload new ones, and edit their configs.
 
+Since 0.2.0 the plugin also:
+
+- **installs Metamod:Source and CounterStrikeSharp** with one click (latest
+  release, downloaded and unpacked on the node) and offers an update button
+  when a newer release ships;
+- **repairs `gameinfo.gi`** with a *Fix* button, and re-checks every CS2
+  server on a 6-hour schedule - CS2 updates keep stripping the Metamod search
+  path, this puts it back automatically;
+- ships a **CS2-tolerant RCON protocol** that overrides the panel's built-in
+  Source client for `cs2` servers: multi-packet replies, oversized packets,
+  both auth response shapes and CS2's unsolicited console output are all
+  handled instead of erroring out;
+- offers a **catalog** of well-known plugins (MatchZy, CS2-SimpleAdmin,
+  Retakes, WeaponPaints, K4-System) installable straight from their GitHub
+  releases, with **update badges** on installed rows (versions checked
+  nightly and cached);
+- manages **binary Metamod plugins** (the `addons/metamod/*.vdf` aliases)
+  with the same on/off switches;
+- edits **CounterStrikeSharp admins** (`configs/admins.json` +
+  `admin_groups.json`) in a structured editor;
+- shows the **CSS log tail** with filtering, to diagnose rows in Error state;
+- takes **snapshots** of `plugins/` + `configs/plugins/` (tarballs on the
+  server, newest 5 kept) with one-click restore - also the transfer format
+  for copying a setup between servers;
+- keeps an **audit history** of panel actions and shows a **restart banner**
+  with a restart button whenever changes are waiting for one.
+
 ## Credits
 
 This project is entirely based on
@@ -36,8 +63,18 @@ groups set in the panel and in game stay in sync. Neither requires the other.
 ## Requirements
 
 **Panel:** a GameAP installation recent enough to support WASM panel plugins
-(the current [gameap/gameap](https://github.com/gameap/gameap) line — same
-requirement as the original goldsrc-addons plugin).
+AND the `gameap-net` / `gameap-scheduler` host modules (current
+[gameap/gameap](https://github.com/gameap/gameap) main). Since 0.2.0 the
+plugin imports both modules, so it will not load on older panels - use a
+0.1.x build there. Related panel settings, all default-on:
+`PLUGIN_NET_ENABLED=true` (the CS2 RCON protocol; with `false` the panel
+falls back to its built-in Source client), and plugin HTTP with `https`
+allowed (release lookups query `api.github.com` and `mms.alliedmods.net`).
+
+**Node:** platform installs and snapshots run `curl`/`wget`, `tar` and
+`unzip` (fallbacks: `python3 -m zipfile`, `busybox unzip`) on a **linux**
+node. A stock Debian/Ubuntu box has everything except possibly `unzip` -
+`apt install unzip` covers the CounterStrikeSharp bundle.
 
 **Game server** (for full functionality; the tab degrades gracefully without):
 
@@ -129,12 +166,31 @@ Typical flows:
 All admin-only, under `/api/plugins/mnzteylemrxw4`:
 
 ```
-GET    /servers/{id}/state               assembled Metamod/CSS state
+GET    /servers/{id}/state               assembled Metamod/CSS state (+ vdf plugins)
 POST   /servers/{id}/plugins/toggle      {name, enabled}   folder move
 POST   /servers/{id}/plugins/attributes  {name, comment, group}
 POST   /servers/{id}/plugins             {name, force?}    register upload
 DELETE /servers/{id}/plugins             {name} or ?name=  delete
+POST   /servers/{id}/gameinfo/repair     re-add the Metamod search path
+POST   /servers/{id}/metamod/toggle      {name, enabled}   rename the .vdf
+GET    /servers/{id}/logs                tail of the newest CSS log
+POST   /servers/{id}/restart             restart via servercontrol
+GET    /servers/{id}/updates             latest upstream versions (?refresh=1)
+GET    /servers/{id}/catalog             curated plugin catalog
+POST   /servers/{id}/catalog/install     {key}             install from GitHub
+POST   /servers/{id}/platform/install    {kind: metamod|css}
+POST   /servers/{id}/snapshots           create snapshot
+GET    /servers/{id}/snapshots           list snapshots
+POST   /servers/{id}/snapshots/restore   {name}
+DELETE /servers/{id}/snapshots           {name}
+GET    /servers/{id}/audit               recent panel actions
 ```
+
+Beyond HTTP, the plugin exports two optional panel services: a
+**ProtocolService** registering the CS2-tolerant Source RCON protocol for
+game code `cs2` (transport: plugin, wire I/O over the `gameap-net` host
+library), and a **ScheduledTaskHandler** with two tasks -
+`cs2addons-gameinfo-autorepair` (6h) and `cs2addons-update-check` (24h).
 
 The tab is shown only on Source-engine servers and requires the
 `plugin:mnzteylemrxw4:manage` ability (granted to admins automatically); the
@@ -195,6 +251,15 @@ On Windows, `make wasm` translates to
   `<Name>/<Name>.dll` (broken layout — fix the folder name or dll name), or
   the plugin is tracked in `plugins_meta.json` but its folder was deleted
   (delete the row to forget it).
+- **The plugin no longer loads after updating to 0.2.0** — the panel predates
+  the `gameap-net`/`gameap-scheduler` host modules. Update the panel (or stay
+  on a 0.1.x build of this plugin).
+- **Platform install fails with EXTRACT_FAILED or DOWNLOAD_FAILED** — the
+  node is missing `curl`/`unzip`; the error message names what was tried.
+  `apt install curl unzip` and retry. Both features require a linux node.
+- **No update badges appear** — versions come from api.github.com; check the
+  panel's outbound plugin-HTTP policy (`PLUGIN_HTTP_*`) and the panel log.
+  Unauthenticated GitHub API calls are also rate-limited per IP.
 - **Where is the manifest?**
   `game/csgo/addons/counterstrikesharp/configs/plugins/AddonsManager/plugins_meta.json`
   — plain JSON, safe to hand-edit; the path is shared with the
@@ -224,9 +289,10 @@ frontend/                   Vue 3 frontend (vite lib build, embedded into the wa
 └── src/api/                clients for the wasm routes and existing panel endpoints
 ```
 
-Tests: `cargo test` (32 backend tests run natively against the mock node — no
-panel needed) and `cd frontend && npm test` (22 vitest tests for the parsers
-and status logic).
+Tests: `cargo test` (68 backend tests run natively against the mock node — no
+panel needed, including the tolerant-RCON engine over scripted byte streams)
+and `cd frontend && npm test` (22 vitest tests for the parsers and status
+logic).
 
 ## Feature mapping from the original
 

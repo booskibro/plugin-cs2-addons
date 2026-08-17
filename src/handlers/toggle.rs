@@ -14,6 +14,7 @@ pub fn handle<H: HostApi>(
     host: &mut H,
     params: &HashMap<String, String>,
     body: &[u8],
+    actor: Option<&str>,
 ) -> ApiResult {
     let context = ServerCtx::resolve(host, params)?;
     let request: ToggleRequest = parse_json_body(body)?;
@@ -56,6 +57,14 @@ pub fn handle<H: HostApi>(
     }
 
     super::move_dir(host, &context, &current_abs, &target_abs)?;
+
+    super::audit::record(
+        host,
+        context.server_id,
+        actor,
+        if request.enabled { "plugin-enable" } else { "plugin-disable" },
+        &request.name,
+    );
 
     Ok(json_response(
         200,

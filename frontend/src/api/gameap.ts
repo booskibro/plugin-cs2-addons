@@ -63,7 +63,14 @@ function toRconError(error: unknown): RconError {
     if (status === 422) {
         return new RconError('bad-password', 'rcon authentication failed');
     }
-    return new RconError('error', axios.isAxiosError(error) ? error.message : String(error));
+    if (axios.isAxiosError(error)) {
+        // The panel body's "message" says what actually broke (e.g. "failed to
+        // execute rcon command: response ID mismatch"); the axios message is
+        // only the HTTP status line.
+        const data = error.response?.data as { message?: string } | undefined;
+        return new RconError('error', data?.message ?? error.message);
+    }
+    return new RconError('error', String(error));
 }
 
 /** POST /api/file-manager/{id}/update-file — multipart write into a directory. */
