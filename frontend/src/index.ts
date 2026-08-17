@@ -7,7 +7,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
     // normalization (valid base32, a-z2-7): base32("cs2addon").
     id: 'mnzteylemrxw4',
     name: 'CS2 Addons',
-    version: '0.3.0',
+    version: '0.3.1',
     apiVersion: '1.0',
     description: 'Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers',
     author: 'BooskiBro (after gameap/plugin-goldsrc-addons by GameAP)',
@@ -214,6 +214,8 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             rcon_usercon_missing:
                 'RCON cannot work: the launch parameters are missing -usercon. Add it in Launch Settings and restart.',
+            rcon_metamod_not_loaded:
+                'The console works, but Metamod is not loaded in the running server - restart the server to load it.',
 
             action_reload: 'Reload',
             reloaded_ok: 'Plugin ":name" reloaded',
@@ -453,6 +455,8 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             rcon_usercon_missing:
                 'RCON не может работать: в параметрах запуска нет -usercon. Добавьте его в настройках запуска и перезапустите сервер.',
+            rcon_metamod_not_loaded:
+                'Консоль работает, но Metamod не загружен на запущенном сервере - перезапустите сервер.',
 
             action_reload: 'Перезагрузить',
             reloaded_ok: 'Плагин «:name» перезагружен',

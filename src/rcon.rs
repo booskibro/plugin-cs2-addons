@@ -158,14 +158,24 @@ pub fn execute<W: Wire>(
 
     let mut output: Vec<u8> = Vec::new();
     let mut received_any = false;
+    let mut marker_seen = false;
     for _ in 0..MAX_PACKETS_PER_EXCHANGE {
-        let timeout_ms = if received_any {
+        let timeout_ms = if received_any || marker_seen {
             IDLE_TIMEOUT_MS
         } else {
             FIRST_RESPONSE_TIMEOUT_MS
         };
         match session.next_packet(wire, timeout_ms)? {
-            Some(packet) if packet.id == marker_id => break,
+            Some(packet) if packet.id == marker_id => {
+                if received_any {
+                    break;
+                }
+                // CS2 answers marker requests on its network thread while the
+                // command's output is produced asynchronously on the game
+                // thread — the echo can overtake the output. Grace-read until
+                // an idle gap instead of declaring the response empty.
+                marker_seen = true;
+            }
             Some(packet) if packet.id == request_id && packet.ptype == TYPE_RESPONSE_VALUE => {
                 received_any = true;
                 if output.len() + packet.body.len() > MAX_TOTAL_OUTPUT {
@@ -174,7 +184,7 @@ pub fn execute<W: Wire>(
                 output.extend_from_slice(&packet.body);
             }
             Some(_) => continue, // unsolicited console output, stale packets
-            None if received_any => break, // idle gap after data = done
+            None if received_any || marker_seen => break, // idle gap = done
             None => return Err("server did not answer the command".into()),
         }
     }
@@ -328,6 +338,30 @@ mod tests {
         let mut session = Session::default();
         let out = execute(&mut wire, &mut session, "x", 10, 11).expect("exec");
         assert_eq!(out, "split");
+    }
+
+    #[test]
+    fn exec_marker_overtaking_output_still_collects() {
+        // CS2's async console: the marker echo arrives BEFORE the command
+        // output. The engine must keep reading instead of returning "".
+        let mut wire = ScriptedWire::default();
+        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
+        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"late ");
+        wire.push_packet(10, TYPE_RESPONSE_VALUE, b"output");
+        wire.push_timeout();
+        let mut session = Session::default();
+        let out = execute(&mut wire, &mut session, "meta version", 10, 11).expect("exec");
+        assert_eq!(out, "late output");
+    }
+
+    #[test]
+    fn exec_marker_then_silence_is_empty_not_error() {
+        let mut wire = ScriptedWire::default();
+        wire.push_packet(11, TYPE_RESPONSE_VALUE, b"");
+        wire.push_timeout();
+        let mut session = Session::default();
+        let out = execute(&mut wire, &mut session, "silent_cmd", 10, 11).expect("exec");
+        assert_eq!(out, "");
     }
 
     #[test]

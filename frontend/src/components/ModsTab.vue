@@ -265,6 +265,7 @@ type RconAvailability =
     | 'no-rcon'
     | 'bad-password'
     | 'empty'
+    | 'no-metamod'
     | 'error';
 const rconAvailability = ref<RconAvailability>('unknown');
 // Backend explanation for the generic 'error' reason, shown next to the hint.
@@ -338,6 +339,8 @@ const rconHint = computed(() => {
             return trans('rcon_unavailable_badpass');
         case 'empty':
             return trans('rcon_unavailable_empty');
+        case 'no-metamod':
+            return trans('rcon_metamod_not_loaded');
         case 'error': {
             if (userconMissing.value) {
                 return trans('rcon_usercon_missing');
@@ -464,7 +467,20 @@ async function refreshRcon(): Promise<void> {
         return;
     }
     try {
-        const metaVersionOut = await rcon(props.serverId, 'meta version');
+        const metaVersionOut = await rcon(props.serverId, 'meta version', { allowEmpty: true });
+        if (metaVersionOut.trim() === '') {
+            // CS2 answers unknown commands with an EMPTY response, so a blank
+            // `meta version` usually means Metamod is not loaded (installed
+            // while the server was up, restart pending). Prove the console
+            // itself works with a command that always prints.
+            await rcon(props.serverId, 'status');
+            rconAvailability.value = 'no-metamod';
+            rconErrorDetail.value = null;
+            metaVersion.value = null;
+            cssVersion.value = null;
+            cssRuntime.value = [];
+            return;
+        }
         const metaListOut = await rcon(props.serverId, 'meta list');
         const cssPluginsOut = await rcon(props.serverId, 'css_plugins list');
         metaVersion.value = parseMetaVersion(metaVersionOut);
