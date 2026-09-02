@@ -6,108 +6,45 @@ Counter-Strike 2 servers for managing **Metamod:Source** and
 persistently, hot load/unload without a restart, edit per-plugin comments,
 group plugins, upload new ones, and edit their configs.
 
-Since 0.2.0 the plugin also:
+## Features
 
-- **installs Metamod:Source and CounterStrikeSharp** with one click (latest
-  release, downloaded and unpacked on the node) and offers an update button
-  when a newer release ships;
-- **repairs `gameinfo.gi`** with a *Fix* button, and re-checks every CS2
-  server on a 6-hour schedule - CS2 updates keep stripping the Metamod search
-  path, this puts it back automatically;
-- ships a **CS2-tolerant RCON protocol** that overrides the panel's built-in
-  Source client for `cs2` servers: multi-packet replies, oversized packets,
-  both auth response shapes and CS2's unsolicited console output are all
-  handled instead of erroring out;
-- offers a **catalog** of well-known plugins (MatchZy, CS2-SimpleAdmin,
-  Retakes, WeaponPaints, K4-System) installable straight from their GitHub
-  releases, with **update badges** on installed rows (versions checked
-  nightly and cached);
-- manages **binary Metamod plugins** (the `addons/metamod/*.vdf` aliases)
-  with the same on/off switches;
-- edits **CounterStrikeSharp admins** (`configs/admins.json` +
-  `admin_groups.json`) in a structured editor;
-- shows the **CSS log tail** with filtering, to diagnose rows in Error state;
-- takes **snapshots** of `plugins/` + `configs/plugins/` + `shared/` (tarballs on the
-  server, newest 5 kept) with one-click restore - also the transfer format
-  for copying a setup between servers;
-- keeps an **audit history** of panel actions and shows a **restart banner**
-  with a restart button whenever changes are waiting for one.
+Beyond the basics above:
 
-And since 0.3.0:
+- **One-click platform installs.** Metamod:Source and CounterStrikeSharp are
+  installed and updated from their latest release, downloaded and unpacked on
+  the node, with an update button when a newer one ships.
+- **`gameinfo.gi` repair.** A *Fix* button, plus a 6-hour sweep that re-wires
+  every CS2 server automatically — game updates keep stripping the Metamod
+  search path.
+- **A CS2-tolerant RCON protocol** replacing the panel's built-in Source client
+  for `cs2` servers: multi-packet replies, oversized packets, both auth
+  response shapes and CS2's unsolicited console output are all handled rather
+  than erroring out.
+- **A plugin catalog** (MatchZy, CS2-SimpleAdmin, Retakes, WeaponPaints,
+  K4-System) installable straight from GitHub releases, with update badges on
+  installed rows.
+- **Zip installs.** Drop any release archive on the Upload dialog; the layout
+  is detected — `addons/`-rooted, `plugins/` + `shared/`, `Name/Name.dll` or a
+  loose dll — and unpacked to the right place, including the contract
+  assemblies under `shared/` that some plugins need to load at all.
+- **Snapshots** of `plugins/`, `configs/plugins/` and `shared/` as tarballs on
+  the server, taken automatically before anything overwrites files and
+  restorable in one click. Also the transfer format for copying a setup between
+  servers.
+- **Binary Metamod plugins** (`addons/metamod/*.vdf` aliases) with the same
+  on/off switches — with CounterStrikeSharp's own alias guarded, since
+  switching that one off unloads the entire platform.
+- **A CounterStrikeSharp admins editor** for `configs/admins.json` and
+  `admin_groups.json`, as an editable table.
+- **A log viewer** with filtering, following and a download link, and a **Doctor**
+  dialog running every health check in one pass — launch parameters, RCON,
+  `gameinfo.gi` wiring, folder placement and layout, shared assemblies, manifest
+  orphans, ambiguous `.vdf` aliases, plugins that failed to load, and leftover
+  downloads.
+- **An audit history** of panel actions, and a restart banner when changes are
+  genuinely waiting for one.
 
-- **zip installs**: drop any release archive on the Upload dialog - the
-  layout (addons/-rooted, `Name/Name.dll`, loose dll) is detected and
-  unpacked to the right place, folders registered automatically;
-- **automatic safety snapshots** before platform installs, catalog installs,
-  zip installs and restores - every overwrite is reversible;
-- a **-usercon detector**: when RCON fails and the launch command lacks
-  `-usercon`, the hint says exactly that instead of a generic error;
-- an **Update all** button when several catalog plugins wear update badges;
-- a per-row **Reload** action (`css_plugins stop` + `load` in one click);
-- **JSON validation** in the config editor - a malformed config cannot be
-  saved - plus a Format button;
-- **log following** (auto-refresh) and a download link in the log viewer;
-- a **Doctor** dialog running every health check in one pass: launch
-  parameters, RCON, gameinfo wiring, duplicate folders, broken layouts,
-  manifest orphans, ambiguous .vdf aliases, leftover downloads.
-
-And since 0.4.0:
-
-- **shared-assembly support**: release zips rooted at `plugins/` + `shared/`
-  now install (they were rejected outright before), `shared/` is captured in
-  snapshots, and the Doctor checks its layout. A plugin whose contract
-  assembly is missing throws while loading, and CounterStrikeSharp then keeps
-  a context with no plugin instance - which makes `css_plugins load` fail for
-  *every* plugin until the server restarts;
-- a **load-failure check**: the Doctor reads the CounterStrikeSharp log and
-  names any plugin that failed to load, plus the assembly it could not find;
-- **failed hot actions explain themselves**: CSS logs load errors rather than
-  answering on the console, so a failed Load now surfaces the log's last error
-  line instead of a red toast with no reason;
-- an **editable admins table** in place of the stacked list, and a Doctor
-  dialog laid out in two columns.
-
-And since 0.5.0:
-
-- **the CounterStrikeSharp alias is guarded**: `addons/metamod/counterstrikesharp.vdf`
-  appears in the Metamod plugin list like any other binary plugin, but switching
-  it off unloads the whole platform - it now carries a *platform* badge, asks for
-  confirmation, and the backend refuses the toggle without an explicit `force`;
-- **"unknown command" is understood**: when Metamod answers but CounterStrikeSharp
-  does not, the tab says so plainly - in the hint line, in a failed Load's toast
-  and as a Doctor check - instead of parsing the reply as "no plugins running"
-  and quietly showing folder state.
-
-And since 0.6.0:
-
-- **fixed**: a release zip shipping its plugin as a bare `<Name>/` folder beside
-  `shared/` unpacked the plugin one level too high, straight into
-  `addons/counterstrikesharp/`, where the dotnet host fails with "Failed to
-  locate managed application". Archive entries are now routed per top-level
-  folder - `plugins/`, `shared/`, `configs/`, `gamedata/` keep their prefix and
-  everything else lands in `plugins/`. Introduced in 0.4.0;
-- the Doctor gains a **placement check** for plugin folders sitting outside
-  `plugins/`, and its **shared-assembly check now names the dll it found**
-  (`shared/GoldKingZ/ holds GoldKingZ.Api.dll - rename the folder to
-  GoldKingZ.Api`) instead of only saying one is missing;
-- the **restart banner stops crying wolf**: it no longer counts rows that are
-  enabled on disk but not loaded, a state a plugin can sit in permanently when
-  it fails to load or its module name never matches its folder.
-
-And in 0.6.1, two fixes to how rows are matched against `css_plugins list`:
-
-- a version containing parentheses (`"RockTheVote" (1.9.6 (RELEASE))`) failed the
-  line regex, dropping that plugin from the runtime list entirely - a loaded
-  plugin showed as *Awaiting load*;
-- ModuleName is matched to the folder in three passes (exact, then prefix, then
-  a long shared opening), each running over every row before the next begins, so
-  decorated names like `PlayerSettings [Core]` or `CS2-SimpleAdmin (RELEASE)`
-  pair with their folders while `CS2-SimpleAdmin` cannot steal the entry
-  belonging to `CS2-SimpleAdmin_FunCommands`.
-
-0.6.3 and 0.6.4 are about the panel rather than the tab - the permissions the
-plugin declares under GameAP 4.5, and the file-size limits 4.5 introduced. Both
-are written up under [GameAP 4.5](#gameap-45).
+Version-by-version history is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Credits
 
@@ -143,8 +80,9 @@ groups set in the panel and in game stay in sync. Neither requires the other.
 **Panel:** a GameAP installation recent enough to support WASM panel plugins
 AND the `gameap-net` / `gameap-scheduler` host modules (current
 [gameap/gameap](https://github.com/gameap/gameap) main). Since 0.2.0 the
-plugin imports both modules, so it will not load on older panels - use a
-0.1.x build there. Related panel settings, all default-on:
+plugin imports both modules, so it will not load on older panels; no 0.1.x
+build is published, so an older panel means building one from the `0.1.0`
+history yourself. Related panel settings, all default-on:
 `PLUGINS_NET_ENABLED=true` (the CS2 RCON protocol; with `false` the panel
 falls back to its built-in Source client), and plugin HTTP with `https`
 allowed (release lookups query `api.github.com` and `mms.alliedmods.net`).
