@@ -127,9 +127,11 @@ groups set in the panel and in game stay in sync. Neither requires the other.
 
 ## Quick start
 
-1. Get `cs2-addons.wasm` — download the `cs2-addons-wasm` artifact from the
-   latest [Actions run](../../actions), or build it yourself (see
-   [Build](#build)).
+1. Get `cs2-addons.wasm` from the [latest release](../../releases/latest) —
+   it is attached to every release as a downloadable asset. (Unreleased
+   builds are also produced by CI as the `cs2-addons-wasm` artifact of an
+   [Actions run](../../actions), but those expire and need a GitHub login to
+   download.) You can also build it yourself — see [Build](#build).
 2. In your GameAP panel: **Administration → Plugins → upload** the `.wasm`
    (or copy it into the panel's plugins directory by hand).
 3. Restart the panel.
