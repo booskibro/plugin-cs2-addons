@@ -67,6 +67,9 @@ pub struct MetamodPluginEntry {
     pub name: String,
     /// The .vdf is live (not renamed to .vdf.disabled).
     pub enabled: bool,
+    /// This alias is CounterStrikeSharp itself, not a plugin: switching it off
+    /// unloads the platform. The frontend confirms before touching it.
+    pub platform: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -149,6 +152,10 @@ pub struct MetamodToggleRequest {
     /// VDF stem inside addons/metamod (no extension).
     pub name: String,
     pub enabled: bool,
+    /// Required to disable the CounterStrikeSharp alias, which is a
+    /// platform-wide off switch rather than a per-plugin one.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[derive(Serialize, Debug)]

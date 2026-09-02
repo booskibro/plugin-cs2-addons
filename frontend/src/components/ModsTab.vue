@@ -40,40 +40,62 @@
                             <i class="fa-solid fa-arrow-up-from-bracket"></i>
                             <span class="ml-1">{{ trans('update_all', { count: updatableCatalog.length }) }}</span>
                         </GButton>
-                        <GButton color="white" size="small" @click="catalogOpen = true">
-                            <i class="fa-solid fa-shapes"></i>
-                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_catalog') }}</span>
-                        </GButton>
-                        <GButton color="white" size="small" @click="snapshotsOpen = true">
-                            <i class="fa-solid fa-box-archive"></i>
-                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_snapshots') }}</span>
-                        </GButton>
-                        <GButton
-                            v-if="state.css.installed"
-                            color="white"
-                            size="small"
-                            @click="adminsOpen = true"
-                        >
-                            <i class="fa-solid fa-user-shield"></i>
-                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_admins') }}</span>
-                        </GButton>
-                        <GButton
-                            v-if="state.css.installed"
-                            color="white"
-                            size="small"
-                            @click="openLogs()"
-                        >
-                            <i class="fa-solid fa-file-waveform"></i>
-                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_logs') }}</span>
-                        </GButton>
-                        <GButton color="white" size="small" @click="auditOpen = true">
-                            <i class="fa-solid fa-clock-rotate-left"></i>
-                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_history') }}</span>
-                        </GButton>
-                        <GButton color="white" size="small" @click="doctorOpen = true">
-                            <i class="fa-solid fa-stethoscope"></i>
-                            <span class="ml-1 hidden sm:inline">{{ trans('toolbar_doctor') }}</span>
-                        </GButton>
+<!-- These buttons render icon-only, so each carries its label as a
+                             hover tooltip. Same label text, so en/ru stay in step. -->
+                        <n-tooltip trigger="hover">
+                            <template #trigger>
+                                <GButton color="white" size="small" @click="catalogOpen = true">
+                                    <i class="fa-solid fa-shapes"></i>
+                                    <span class="ml-1 hidden sm:inline">{{ trans('toolbar_catalog') }}</span>
+                                </GButton>
+                            </template>
+                            {{ trans('toolbar_catalog') }}
+                        </n-tooltip>
+                        <n-tooltip trigger="hover">
+                            <template #trigger>
+                                <GButton color="white" size="small" @click="snapshotsOpen = true">
+                                    <i class="fa-solid fa-box-archive"></i>
+                                    <span class="ml-1 hidden sm:inline">{{ trans('toolbar_snapshots') }}</span>
+                                </GButton>
+                            </template>
+                            {{ trans('toolbar_snapshots') }}
+                        </n-tooltip>
+                        <n-tooltip v-if="state.css.installed" trigger="hover">
+                            <template #trigger>
+                                <GButton color="white" size="small" @click="adminsOpen = true">
+                                    <i class="fa-solid fa-user-shield"></i>
+                                    <span class="ml-1 hidden sm:inline">{{ trans('toolbar_admins') }}</span>
+                                </GButton>
+                            </template>
+                            {{ trans('toolbar_admins') }}
+                        </n-tooltip>
+                        <n-tooltip v-if="state.css.installed" trigger="hover">
+                            <template #trigger>
+                                <GButton color="white" size="small" @click="openLogs()">
+                                    <i class="fa-solid fa-file-waveform"></i>
+                                    <span class="ml-1 hidden sm:inline">{{ trans('toolbar_logs') }}</span>
+                                </GButton>
+                            </template>
+                            {{ trans('toolbar_logs') }}
+                        </n-tooltip>
+                        <n-tooltip trigger="hover">
+                            <template #trigger>
+                                <GButton color="white" size="small" @click="auditOpen = true">
+                                    <i class="fa-solid fa-clock-rotate-left"></i>
+                                    <span class="ml-1 hidden sm:inline">{{ trans('toolbar_history') }}</span>
+                                </GButton>
+                            </template>
+                            {{ trans('toolbar_history') }}
+                        </n-tooltip>
+                        <n-tooltip trigger="hover">
+                            <template #trigger>
+                                <GButton color="white" size="small" @click="doctorOpen = true">
+                                    <i class="fa-solid fa-stethoscope"></i>
+                                    <span class="ml-1 hidden sm:inline">{{ trans('toolbar_doctor') }}</span>
+                                </GButton>
+                            </template>
+                            {{ trans('toolbar_doctor') }}
+                        </n-tooltip>
                     </div>
                 </div>
 
@@ -203,7 +225,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { NCard, NEmpty } from 'naive-ui';
+import { NCard, NEmpty, NTooltip } from 'naive-ui';
 import { providePluginTrans } from '@gameap/plugin-sdk';
 
 import AdminsModal from './AdminsModal.vue';
@@ -220,6 +242,7 @@ import { RconError, cssPluginsCommand, rcon } from '../api/gameap';
 import {
     apiErrorMessage,
     deletePlugin,
+    getLogs,
     getState,
     getUpdates,
     installCatalogPlugin,
@@ -232,6 +255,7 @@ import {
 } from '../api/plugin';
 import {
     cssVersionFromMetaList,
+    isUnknownCommandOutput,
     matchRuntimeToFolders,
     parseCssPlugins,
     parseMetaList,
@@ -267,6 +291,7 @@ type RconAvailability =
     | 'bad-password'
     | 'empty'
     | 'no-metamod'
+    | 'no-css'
     | 'error';
 const rconAvailability = ref<RconAvailability>('unknown');
 // Backend explanation for the generic 'error' reason, shown next to the hint.
@@ -342,6 +367,8 @@ const rconHint = computed(() => {
             return trans('rcon_unavailable_empty');
         case 'no-metamod':
             return trans('rcon_metamod_not_loaded');
+        case 'no-css':
+            return trans('rcon_css_not_loaded');
         case 'error': {
             if (userconMissing.value) {
                 return trans('rcon_usercon_missing');
@@ -397,14 +424,32 @@ const frontendChecks = computed<DoctorCheck[]>(() => {
     } else if (rconAvailability.value !== 'unknown') {
         checks.push({ id: 'rcon', status: 'fail', detail: rconHint.value ?? '' });
     }
+    // Installed on disk but absent from the running server - the state the
+    // plugin table cannot show, because every row falls back to folder state.
+    if (state.value?.css.installed && serverOnline.value) {
+        if (rconAvailability.value === 'no-css') {
+            checks.push({ id: 'cssloaded', status: 'fail', detail: trans('doctor_css_not_loaded') });
+        } else if (rconOk.value) {
+            checks.push({ id: 'cssloaded', status: 'ok', detail: trans('doctor_css_loaded_ok') });
+        }
+    }
     return checks;
 });
 
-/** A restart applies pending work: explicit toggles or rows awaiting load. */
+/**
+ * A restart applies pending work: a change made here, or a plugin switched off
+ * on disk that is still loaded in the running server.
+ *
+ * Deliberately NOT "any row awaiting load". A plugin can sit enabled-on-disk
+ * and unloaded forever - it failed to load, or its runtime module name never
+ * matches its folder - and the banner then claimed changes were waiting when
+ * nothing had changed and no restart would help. Those rows still say
+ * "Awaiting load" and still offer Load; only the banner stops crying wolf.
+ */
 const restartSuggested = computed(
     () =>
         serverOnline.value &&
-        (restartDirty.value || rows.value.some((row) => row.status === 'pending')),
+        (restartDirty.value || rows.value.some((row) => !row.enabled && row.runtime !== null)),
 );
 
 const rows = computed<PluginRow[]>(() => {
@@ -483,9 +528,21 @@ async function refreshRcon(): Promise<void> {
             return;
         }
         const metaListOut = await rcon(props.serverId, 'meta list');
-        const cssPluginsOut = await rcon(props.serverId, 'css_plugins list');
         metaVersion.value = parseMetaVersion(metaVersionOut);
         cssVersion.value = cssVersionFromMetaList(parseMetaList(metaListOut));
+
+        // `css_plugins` is registered by CounterStrikeSharp, so the console not
+        // knowing it means CSS is not loaded - which the files on disk cannot
+        // tell us. Metamod answering while CSS does not is the giveaway, and
+        // Metamod's own version stays on show.
+        const cssPluginsOut = await rcon(props.serverId, 'css_plugins list', { allowEmpty: true });
+        if (cssVersion.value === null || isUnknownCommandOutput(cssPluginsOut)) {
+            rconAvailability.value = 'no-css';
+            rconErrorDetail.value = null;
+            cssVersion.value = null;
+            cssRuntime.value = [];
+            return;
+        }
         cssRuntime.value = parseCssPlugins(cssPluginsOut);
         rconAvailability.value = 'ok';
     } catch (error) {
@@ -576,7 +633,16 @@ async function onHotAction(
                       ? 'reload_failed'
                       : 'load_failed_named';
             // Whitespace-only command output makes an unreadable empty toast.
-            const detail = output.trim();
+            // CounterStrikeSharp logs load failures instead of answering on the
+            // console, so an empty reply is all RCON ever sees - the reason is
+            // in the log, and without it the row just goes red for no stated
+            // cause.
+            if (isUnknownCommandOutput(output)) {
+                rconAvailability.value = 'no-css';
+                toast('error', trans('rcon_css_not_loaded'));
+                return;
+            }
+            const detail = output.trim() || (await lastLogError(row.name));
             toast('error', detail !== '' ? detail : trans(key, { name: row.displayName }));
         }
     } catch (error) {
@@ -589,6 +655,20 @@ async function onHotAction(
         );
     } finally {
         mutating.value = false;
+    }
+}
+
+/** Newest error line in the CounterStrikeSharp log, preferring one that names
+ * the plugin. Best-effort: on any failure the caller's generic message stands. */
+async function lastLogError(pluginName: string): Promise<string> {
+    try {
+        const { lines } = await getLogs(props.pluginId, props.serverId);
+        const errors = lines.filter((line) => /\[EROR\]|error|exception/i.test(line));
+        const named = errors.filter((line) => line.includes(pluginName));
+        const line = (named.length > 0 ? named : errors).at(-1);
+        return line ? line.trim().slice(0, 240) : '';
+    } catch {
+        return '';
     }
 }
 
@@ -719,9 +799,28 @@ async function onRepair(): Promise<void> {
 }
 
 async function onToggleVdf(name: string, enabled: boolean): Promise<void> {
+    // Switching this alias off unloads CounterStrikeSharp itself. It sits in the
+    // same list as ordinary binary plugins, so it gets an explicit confirmation
+    // rather than behaving like one.
+    const platform = state.value?.metamod.plugins.find((entry) => entry.name === name)?.platform;
+    if (platform && !enabled) {
+        window.$dialog?.warning({
+            title: trans('vdf_platform_title'),
+            content: trans('vdf_platform_text'),
+            positiveText: trans('yes'),
+            negativeText: trans('no'),
+            closable: false,
+            onPositiveClick: () => void toggleVdf(name, false, true),
+        });
+        return;
+    }
+    await toggleVdf(name, enabled, false);
+}
+
+async function toggleVdf(name: string, enabled: boolean, force: boolean): Promise<void> {
     mutating.value = true;
     try {
-        await toggleMetamodPlugin(props.pluginId, props.serverId, name, enabled);
+        await toggleMetamodPlugin(props.pluginId, props.serverId, name, enabled, force);
         restartDirty.value = true;
         toast('success', trans(enabled ? 'vdf_enabled' : 'vdf_disabled', { name }));
         await refreshState();

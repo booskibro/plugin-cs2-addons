@@ -94,6 +94,16 @@ fn sanitize_zip_path(raw: &str) -> Option<String> {
 pub enum InstallRoot {
     /// Entries already rooted at the game dir (addons/…, cfg/…): extract as-is.
     GameDir,
+    /// Entries rooted at the CounterStrikeSharp dir (plugins/…, shared/…):
+    /// extract into addons/counterstrikesharp. The shape shared-API releases
+    /// ship, where a contract assembly under shared/ travels with the plugin —
+    /// install the plugin without it and CSS fails to load it.
+    ///
+    /// Routed per entry, not wholesale: releases often ship the plugin as a
+    /// bare `<Name>/` folder *beside* shared/, and those belong in plugins/.
+    /// Extracting them relative to the CSS dir puts the dll one level too high,
+    /// where the dotnet host cannot resolve it.
+    CssDir,
     /// Entries rooted at a single `<Folder>/` that contains `<Folder>.dll`:
     /// extract into plugins/.
     PluginsDir,
@@ -103,6 +113,15 @@ pub enum InstallRoot {
 
 /// The game-dir prefixes a full-overlay release uses.
 const GAME_DIR_ROOTS: &[&str] = &["addons", "cfg", "maps", "materials", "sound", "models", "cfg"];
+/// The prefixes that sit directly inside addons/counterstrikesharp.
+const CSS_DIR_ROOTS: &[&str] = &["plugins", "shared", "configs", "gamedata"];
+
+/// Whether an entry belongs to one of the CounterStrikeSharp dir prefixes,
+/// rather than being a plugin folder shipped beside them.
+pub fn is_css_dir_entry(path: &str) -> bool {
+    let top = path.split('/').next().unwrap_or("");
+    CSS_DIR_ROOTS.contains(&top.to_ascii_lowercase().as_str())
+}
 
 pub fn detect_install_root(entries: &[ArchiveEntry]) -> Result<InstallRoot, String> {
     if entries.is_empty() {
@@ -121,6 +140,16 @@ pub fn detect_install_root(entries: &[ArchiveEntry]) -> Result<InstallRoot, Stri
         .any(|top| GAME_DIR_ROOTS.contains(&top.to_ascii_lowercase().as_str()))
     {
         return Ok(InstallRoot::GameDir);
+    }
+
+    // plugins/ and shared/ as siblings → rooted at the CounterStrikeSharp dir.
+    // Checked before the single-folder rule so a lone plugins/ root is not
+    // mistaken for a plugin folder that happens to be called "plugins".
+    if top_levels
+        .iter()
+        .any(|top| CSS_DIR_ROOTS.contains(&top.to_ascii_lowercase().as_str()))
+    {
+        return Ok(InstallRoot::CssDir);
     }
 
     // Single folder holding its own <Folder>.dll → a plugins/-shaped release.
@@ -144,7 +173,10 @@ pub fn detect_install_root(entries: &[ArchiveEntry]) -> Result<InstallRoot, Stri
         return Ok(InstallRoot::WrapIntoFolder(name));
     }
 
-    Err("unrecognized archive layout: expected addons/…, <Name>/<Name>.dll or a top-level .dll".into())
+    Err(
+        "unrecognized archive layout: expected addons/…, plugins/…, <Name>/<Name>.dll or a top-level .dll"
+            .into(),
+    )
 }
 
 #[cfg(test)]
@@ -209,6 +241,30 @@ mod tests {
 
         let junk = extract_zip(&build_zip(&[("readme.txt", b"x")])).expect("zip");
         assert!(detect_install_root(&junk).is_err());
+    }
+
+    /// The shape a shared-API release ships: the plugin and the contract
+    /// assembly it loads types from, as siblings under the CSS dir.
+    #[test]
+    fn detects_css_dir_root() {
+        let shared = extract_zip(&build_zip(&[
+            ("plugins/PlayerSettings/PlayerSettings.dll", b"x"),
+            ("shared/PlayerSettingsApi/PlayerSettingsApi.dll", b"x"),
+        ]))
+        .expect("zip");
+        assert_eq!(
+            detect_install_root(&shared).expect("root"),
+            InstallRoot::CssDir
+        );
+
+        // A lone plugins/ root counts too - it would otherwise be read as a
+        // plugin folder named "plugins" and fail for want of plugins.dll.
+        let only_plugins =
+            extract_zip(&build_zip(&[("plugins/Retakes/Retakes.dll", b"x")])).expect("zip");
+        assert_eq!(
+            detect_install_root(&only_plugins).expect("root"),
+            InstallRoot::CssDir
+        );
     }
 
     #[test]

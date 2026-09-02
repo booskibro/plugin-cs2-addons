@@ -124,6 +124,7 @@ pub fn handle<H: HostApi>(host: &mut H, params: &HashMap<String, String>) -> Api
             plugins: vdf::list(host, ctx.node_id, &metamod_abs)?
                 .into_iter()
                 .map(|plugin| MetamodPluginEntry {
+                    platform: vdf::is_platform(&plugin.name),
                     name: plugin.name,
                     enabled: plugin.enabled,
                 })

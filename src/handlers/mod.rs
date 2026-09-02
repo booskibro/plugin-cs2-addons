@@ -46,6 +46,11 @@ pub fn css_disabled_abs(ctx: &ServerCtx) -> String {
     paths::join(&css_plugins_abs(ctx), source2::DISABLED_DIR_NAME)
 }
 
+/// Absolute path of the shared-assemblies dir.
+pub fn css_shared_abs(ctx: &ServerCtx) -> String {
+    paths::join(&ctx.game_abs, source2::CSS_SHARED_DIR)
+}
+
 /// 409 unless addons/counterstrikesharp exists on the server.
 fn require_css_installed<H: HostApi>(host: &mut H, ctx: &ServerCtx) -> Result<(), ApiError> {
     let css_abs = paths::join(&ctx.game_abs, source2::CSS_DIR);
@@ -115,11 +120,21 @@ pub(crate) fn write_archive_entries<H: HostApi>(
     use crate::source2::archive::InstallRoot;
 
     let plugins_abs = css_plugins_abs(ctx);
+    let css_abs = paths::join(&ctx.game_abs, source2::CSS_DIR);
     let mut written = 0u32;
     let mut ensured_dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for entry in entries {
         let target_abs = match root {
             InstallRoot::GameDir => paths::join(&ctx.game_abs, &entry.path),
+            // plugins/, shared/, … keep their prefix; anything else in the
+            // archive is a plugin folder and belongs under plugins/.
+            InstallRoot::CssDir => {
+                if crate::source2::archive::is_css_dir_entry(&entry.path) {
+                    paths::join(&css_abs, &entry.path)
+                } else {
+                    paths::join(&plugins_abs, &entry.path)
+                }
+            }
             InstallRoot::PluginsDir => paths::join(&plugins_abs, &entry.path),
             InstallRoot::WrapIntoFolder(folder) => {
                 paths::join(&paths::join(&plugins_abs, folder), &entry.path)
@@ -153,17 +168,18 @@ pub(crate) fn archive_plugin_folders(
             }
             folders
         }
-        InstallRoot::GameDir => {
-            const PLUGINS_PREFIX: &str = "addons/counterstrikesharp/plugins/";
-            let mut folders = Vec::new();
+        InstallRoot::GameDir => folders_under(entries, "addons/counterstrikesharp/plugins/"),
+        InstallRoot::CssDir => {
+            // Both shapes count: under plugins/, and bare folders beside it.
+            let mut folders = folders_under(entries, "plugins/");
             for entry in entries {
-                let lower = entry.path.to_ascii_lowercase();
-                if let Some(rest) = lower
-                    .starts_with(PLUGINS_PREFIX)
-                    .then(|| &entry.path[PLUGINS_PREFIX.len()..])
-                    && let Some(folder) = rest.split('/').next()
+                if crate::source2::archive::is_css_dir_entry(&entry.path) {
+                    continue;
+                }
+                if let Some(folder) = entry.path.split('/').next()
                     && !folder.is_empty()
-                    && rest.contains('/')
+                    && entry.path.contains('/')
+                    && !folder.eq_ignore_ascii_case(source2::DISABLED_DIR_NAME)
                     && !folders
                         .iter()
                         .any(|f: &String| f.eq_ignore_ascii_case(folder))
@@ -174,6 +190,33 @@ pub(crate) fn archive_plugin_folders(
             folders
         }
     }
+}
+
+/// Plugin folder names in `<prefix><Folder>/<file>` entries. Only folders that
+/// actually carry a file are counted, and the parking dir never becomes a
+/// plugin of its own.
+fn folders_under(
+    entries: &[crate::source2::archive::ArchiveEntry],
+    prefix: &str,
+) -> Vec<String> {
+    let mut folders: Vec<String> = Vec::new();
+    for entry in entries {
+        let lower = entry.path.to_ascii_lowercase();
+        if let Some(rest) = lower
+            .starts_with(prefix)
+            .then(|| &entry.path[prefix.len()..])
+            && let Some(folder) = rest.split('/').next()
+            && !folder.is_empty()
+            && !folder.eq_ignore_ascii_case(source2::DISABLED_DIR_NAME)
+            && rest.contains('/')
+            && !folders
+                .iter()
+                .any(|f: &String| f.eq_ignore_ascii_case(folder))
+        {
+            folders.push(folder.to_string());
+        }
+    }
+    folders
 }
 
 /// Creates every missing ancestor of `file_abs` (the daemon's mk_dir is not

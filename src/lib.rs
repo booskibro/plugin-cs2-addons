@@ -54,7 +54,7 @@ impl<H: HostApi> Plugin for Cs2Addons<H> {
             version: env!("CARGO_PKG_VERSION").into(),
             description: "Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers"
                 .into(),
-            author: "BooskiBro (after gameap/plugin-goldsrc-addons by GameAP)".into(),
+            author: "SilverSasquatchGameAPDev".into(),
             license: "MIT".into(),
             api_version: "1".into(),
             ..Default::default()

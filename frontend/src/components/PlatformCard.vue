@@ -73,6 +73,11 @@
                     <span class="font-mono text-xs text-stone-700 dark:text-stone-200">
                         {{ plugin.name }}
                     </span>
+                    <!-- CounterStrikeSharp registers itself here: the switch
+                         beside it is a platform-wide one, not a plugin's. -->
+                    <span v-if="plugin.platform" class="badge-orange !me-0 text-xs">
+                        {{ trans('vdf_platform_badge') }}
+                    </span>
                 </div>
                 <div class="text-[11px] text-stone-400 dark:text-stone-500">
                     {{ trans('vdf_hint') }}

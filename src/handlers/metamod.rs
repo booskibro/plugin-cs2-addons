@@ -19,6 +19,16 @@ pub fn handle<H: HostApi>(
     let request: MetamodToggleRequest = parse_json_body(body)?;
     ctx::sanitize_plugin_name(&request.name)?;
 
+    // Disabling this one alias unloads CounterStrikeSharp itself - every CSS
+    // plugin stops and `css_plugins` becomes an unknown console command. It is
+    // still allowed, but never as an unremarkable row switch.
+    if !request.enabled && !request.force && vdf::is_platform(&request.name) {
+        return Err(ApiError::conflict(
+            "PLATFORM_VDF",
+            "counterstrikesharp.vdf registers CounterStrikeSharp itself; disabling it unloads every CSS plugin and the console commands this tab relies on",
+        ));
+    }
+
     let metamod_abs = paths::join(&context.game_abs, source2::METAMOD_DIR);
     let live_abs = paths::join(&metamod_abs, &format!("{}{}", request.name, vdf::VDF_EXT));
     let parked_abs = paths::join(
