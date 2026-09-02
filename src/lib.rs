@@ -33,6 +33,33 @@ use crate::host_api::HostApi;
 // "mnzteylemrxw4" is base32("cs2addon") and is round-trip stable.
 pub const PLUGIN_ID: &str = "mnzteylemrxw4";
 
+/// The grants this plugin needs, as GameAP 4.5 names them.
+///
+/// The panel derives what a plugin *uses* from its wasm import section
+/// (internal/plugin/permissions.go, against hostlibrary's policy table) and
+/// flags anything used-but-not-declared as a missing grant in the admin UI and
+/// in the upload dry-run. Each entry below is the narrowest grant covering a
+/// host call this plugin actually makes:
+///
+/// - `node_commands` - nodecmd.execute_command
+/// - `files` - nodefs mk_dir, move, remove, upload, chmod. It also covers `files_read`, which is all the
+///   reads (read_dir, download, get_file_info) would need on their own:
+///   the panel treats a broader grant as satisfying a narrower one, and its own
+///   derivation drops the narrower one, so declaring both would disagree with
+///   what the admin UI reports as used.
+/// - `manage_servers` - servercontrol.restart_server
+///
+/// Deliberately absent: gameap-nodes get_node and gameap-servers
+/// find_servers/get_server are read-only and ungated; gameap-http, gameap-storage,
+/// gameap-scheduler, gameap-net, gameap-games and gameap-log are not gated at
+/// all; and `listen_events` is for a plugin that subscribes to events, which
+/// this one does not.
+///
+/// Nothing here is enforced yet - PLUGINS_PERMISSIONS_ENFORCE defaults to false
+/// in 4.5, and a panel older than 4.5 ignores the field entirely - but a later
+/// release turns it on, and an undeclared plugin is refused then.
+pub const REQUIRED_PERMISSIONS: [&str; 3] = ["node_commands", "files", "manage_servers"];
+
 const FRONTEND_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/plugin.js"));
 const FRONTEND_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/plugin.css"));
 
@@ -57,6 +84,10 @@ impl<H: HostApi> Plugin for Cs2Addons<H> {
             author: "SilverSasquatchGameAPDev".into(),
             license: "MIT".into(),
             api_version: "1".into(),
+            required_permissions: REQUIRED_PERMISSIONS
+                .iter()
+                .map(|permission| (*permission).to_string())
+                .collect(),
             ..Default::default()
         })
     }
@@ -122,3 +153,74 @@ register_plugin!(
     Cs2Addons<host_api::WasmHost>,
     Cs2Addons::new(host_api::WasmHost)
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host_api::mock::MockHost;
+
+    /// Every permission GameAP 4.5 understands (internal/domain/plugin.go,
+    /// PluginPermissions).
+    const PANEL_PERMISSIONS: [&str; 12] = [
+        "manage_servers",
+        "manage_nodes",
+        "manage_games",
+        "manage_game_mods",
+        "manage_users",
+        "manage_rbac",
+        "files",
+        "files_read",
+        "listen_events",
+        "secrets",
+        "node_commands",
+        "ssh",
+    ];
+
+    #[test]
+    fn get_info_reports_the_declared_permissions() {
+        let mut plugin = Cs2Addons::new(MockHost::default());
+        let info = plugin
+            .get_info(pb::GetInfoRequest::default())
+            .expect("get_info");
+
+        let declared: Vec<&str> = info
+            .required_permissions
+            .iter()
+            .map(String::as_str)
+            .collect();
+
+        assert_eq!(declared, REQUIRED_PERMISSIONS);
+    }
+
+    #[test]
+    fn every_declared_permission_is_one_the_panel_knows() {
+        // ParsePluginPermissions silently DROPS names it does not recognize, so
+        // a typo would not fail the install - it would quietly grant less than
+        // intended, and only show up as a denied host call once enforcement is
+        // on. This is the check that turns that into a build failure.
+        for permission in REQUIRED_PERMISSIONS {
+            assert!(
+                PANEL_PERMISSIONS.contains(&permission),
+                "{permission} is not a permission GameAP understands"
+            );
+        }
+    }
+
+    #[test]
+    fn declares_nothing_twice_and_nothing_another_grant_covers() {
+        let mut seen = REQUIRED_PERMISSIONS.to_vec();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(
+            seen.len(),
+            REQUIRED_PERMISSIONS.len(),
+            "the same permission is declared more than once"
+        );
+
+        assert!(
+            !(REQUIRED_PERMISSIONS.contains(&"files")
+                && REQUIRED_PERMISSIONS.contains(&"files_read")),
+            "files already covers files_read; declaring both disagrees with the panel"
+        );
+    }
+}

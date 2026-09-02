@@ -27,6 +27,24 @@ use ctx::ServerCtx;
 
 const MANIFEST_FILE_PERMISSIONS: u32 = 0o644;
 
+/// The panel's per-call nodefs limit, PLUGINS_NODEFS_MAX_INLINE, at its default.
+///
+/// GameAP 4.5 caps what one gameap-nodefs download or upload may carry, because
+/// the payload is materialized in panel memory and then copied into the guest.
+/// The default is `32M`, and the panel's ByteSize parser reads every suffix as
+/// binary (`M` = 1 << 20), so it is this number to the byte. Both comparisons
+/// are strict: something exactly this size passes, one byte more is refused
+/// outright rather than truncated.
+///
+/// Two call paths here are bounded by it, and both check against this constant
+/// rather than keeping their own copy of "32MB" - the point is that they move
+/// together if the panel's default ever does. Note the margin is exactly zero:
+/// an operator who *lowers* PLUGINS_NODEFS_MAX_INLINE puts the panel's limit
+/// below these gates, and the refusal then comes from the panel with a less
+/// useful message. Nothing here can detect that - the panel does not report its
+/// limit to the guest.
+pub(crate) const PANEL_MAX_INLINE_BYTES: u64 = 32 * 1024 * 1024;
+
 /// Unix seconds. wasm32-wasip1 backs this with the WASI clock; native tests
 /// use the OS clock.
 pub fn now_unix() -> u64 {
@@ -117,6 +135,28 @@ pub(crate) fn write_archive_entries<H: HostApi>(
     entries: &[crate::source2::archive::ArchiveEntry],
     root: &crate::source2::archive::InstallRoot,
 ) -> Result<u32, ApiError> {
+    // Pre-flight, before a single byte is written. The panel refuses a nodefs
+    // upload over its inline limit, and these entries go up one at a time - so
+    // discovering an oversized one halfway through would leave a half-installed
+    // plugin, which is worse than refusing the archive outright. It is
+    // reachable without the archive itself being oversized: extraction bounds
+    // the total at MAX_TOTAL_UNCOMPRESSED, twice this limit, and nothing bounds
+    // any single member.
+    if let Some(entry) = entries
+        .iter()
+        .find(|entry| entry.data.len() as u64 > PANEL_MAX_INLINE_BYTES)
+    {
+        return Err(ApiError::unprocessable(
+            "ENTRY_TOO_LARGE",
+            format!(
+                "{} is {} bytes, over the {}-byte limit for one file; unpack this archive with the file manager instead",
+                entry.path,
+                entry.data.len(),
+                PANEL_MAX_INLINE_BYTES
+            ),
+        ));
+    }
+
     use crate::source2::archive::InstallRoot;
 
     let plugins_abs = css_plugins_abs(ctx);

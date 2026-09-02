@@ -12,8 +12,23 @@ use crate::http::{ApiResult, json_response};
 use crate::model::LogsResponse;
 use crate::source2::{self, paths};
 
-/// Only the tail of a big log is downloaded — the daemon has no ranged reads,
-/// so the cap guards the wasm heap, not the transfer.
+/// The whole log is downloaded and only its tail is kept: the cap below guards
+/// the wasm heap, not the transfer.
+///
+/// That used to be the only thing worth saying. Since GameAP 4.5 it is also a
+/// ceiling on the feature: a whole-file nodefs download over
+/// PLUGINS_NODEFS_MAX_INLINE (32 MiB by default) is refused outright rather than
+/// truncated, so a server whose newest log has grown past that loses this route
+/// - and the doctor route with it, which shares the reader - both with the
+/// panel's "file too large" error.
+///
+/// 4.5 also added the fix: `offset`/`length` on the nodefs DownloadRequest,
+/// which would let this read only the tail it actually wants. The plugin cannot
+/// reach it yet - those fields exist in the panel's own proto, while the
+/// gameap-proto commit this crate pins (still the tip of its main branch)
+/// declares DownloadRequest as node_id + path alone. When the SDK catches up,
+/// this becomes a windowed read of the last MAX_TAIL_BYTES and the ceiling goes
+/// away.
 const MAX_LINES: usize = 400;
 const MAX_TAIL_BYTES: usize = 256 * 1024;
 

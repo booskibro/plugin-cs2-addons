@@ -1229,3 +1229,56 @@ fn audit_route_returns_recorded_entries() {
 }
 
 // ------------------------------------------- archive entry size guard
+
+/// An entry at exactly the panel's inline limit, and one byte over it.
+fn sized_entry(path: &str, len: u64) -> crate::source2::archive::ArchiveEntry {
+    crate::source2::archive::ArchiveEntry {
+        path: path.to_string(),
+        data: vec![0u8; len as usize],
+        mode: 0o644,
+    }
+}
+
+#[test]
+fn an_entry_over_the_panel_inline_limit_is_refused_before_anything_is_written() {
+    // Extraction bounds an archive's TOTAL uncompressed size at twice the
+    // panel's per-call upload limit and bounds no single member, so one
+    // oversized file is reachable from an archive that is itself acceptable.
+    // Uploading entry by entry, the panel would refuse that one partway
+    // through and leave a half-installed plugin behind; the guard turns it
+    // into a refusal with nothing written.
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    let ctx = crate::handlers::ctx::ServerCtx::resolve(&mut host, &params("3")).expect("ctx");
+    let before = host.files.len();
+
+    let entries = vec![
+        sized_entry("ok.txt", 8),
+        sized_entry("huge.bin", crate::handlers::PANEL_MAX_INLINE_BYTES + 1),
+    ];
+
+    let err = crate::handlers::write_archive_entries(&mut host, &ctx, &entries, &crate::source2::archive::InstallRoot::GameDir)
+        .expect_err("an entry over the inline limit must be refused");
+
+    assert_eq!(err.status, 422);
+    // Not even the small entry ahead of it — the check runs before the loop.
+    assert_eq!(host.files.len(), before, "nothing may be written");
+}
+
+#[test]
+fn an_entry_exactly_at_the_panel_inline_limit_is_written() {
+    // The panel's own comparison is strict — its tests pin 4096 bytes against
+    // a 4096 cap as an accepted upload — so the boundary value has to pass
+    // here too, or the two disagree at exactly one size and the guard refuses
+    // a file the panel would have taken.
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    let ctx = crate::handlers::ctx::ServerCtx::resolve(&mut host, &params("3")).expect("ctx");
+
+    let entries = vec![sized_entry("exact.bin", crate::handlers::PANEL_MAX_INLINE_BYTES)];
+
+    let written = crate::handlers::write_archive_entries(&mut host, &ctx, &entries, &crate::source2::archive::InstallRoot::GameDir)
+        .expect("the boundary value is not over the limit");
+
+    assert_eq!(written, 1);
+}

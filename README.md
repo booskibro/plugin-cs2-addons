@@ -105,6 +105,10 @@ And in 0.6.1, two fixes to how rows are matched against `css_plugins list`:
   pair with their folders while `CS2-SimpleAdmin` cannot steal the entry
   belonging to `CS2-SimpleAdmin_FunCommands`.
 
+0.6.3 and 0.6.4 are about the panel rather than the tab - the permissions the
+plugin declares under GameAP 4.5, and the file-size limits 4.5 introduced. Both
+are written up under [GameAP 4.5](#gameap-45).
+
 ## Credits
 
 This project is entirely based on
@@ -165,6 +169,86 @@ node. A stock Debian/Ubuntu box has everything except possibly `unzip` -
   still works — you just lose live data (versions, Running/Stopped states,
   hot load/unload); everything file-based keeps working and a hint line
   explains what's unavailable.
+
+## GameAP 4.5
+
+The plugin runs unchanged on 4.5. Three things there are worth knowing, and one
+of them is a limit you can actually hit.
+
+**Permissions.** 4.5 gates the privileged host libraries behind grants a plugin
+declares in its manifest, and this one declares three:
+
+| Grant | For |
+| --- | --- |
+| `node_commands` | `gameap-nodecmd.execute_command` - the node-side unpack and platform installs |
+| `files` | the `gameap-nodefs` writes (`chmod`, `mk_dir`, `move`, `remove`, `upload`). It covers `files_read`, so the reads are not listed separately - the panel treats a broader grant as satisfying a narrower one and drops the subsumed entry |
+| `manage_servers` | `gameap-servercontrol.restart_server` |
+
+Nothing else needs one. `gameap-nodes.get_node` and `gameap-servers`'
+`find_servers`/`get_server` are read-only and ungated - it is the *writes* on
+those modules that need `manage_nodes` and `manage_servers`, and this plugin
+makes none. `gameap-http`, `gameap-storage`, `gameap-scheduler`, `gameap-games`
+and `gameap-log` are not gated at all.
+
+The list is not a judgement call: the panel derives what a plugin *uses* from
+its wasm import section, matched against its own policy table, and shows
+anything used-but-undeclared as a missing grant. `REQUIRED_PERMISSIONS` in
+`src/lib.rs` is checked against the panel's twelve known names by a unit test,
+because `ParsePluginPermissions` silently **drops** a name it does not
+recognise - a typo there would not fail an install, it would grant less than
+intended and surface much later as a denied call.
+
+`PLUGINS_PERMISSIONS_ENFORCE` still defaults to `false` in 4.5, so nothing is
+enforced yet; a later release turns it on.
+
+> **Panel variable names changed during 4.5.** Every plugin setting was renamed
+> `PLUGIN_*` → `PLUGINS_*` in `v4.5.0-rc.1` (PR #85). The old spelling keeps
+> working for **one release** - the panel applies it and logs a deprecation
+> warning naming the replacement, and the new name wins if both are set - so
+> this is worth getting ahead of rather than racing. This README uses the rc.1
+> names throughout. On `v4.5.0-beta.1` drop the `S`:
+> `PLUGIN_NODEFS_MAX_INLINE`. On 4.4.x none of these exist at all, because the
+> limits they control arrived with 4.5.
+
+**A 32 MiB ceiling on single file transfers.** `PLUGINS_NODEFS_MAX_INLINE`
+caps what one `gameap-nodefs` download or upload may carry, and there was no
+equivalent before. It binds two paths here:
+
+- **Zip installs.** The plugin's own `MAX_ARCHIVE_BYTES` is 33,554,432 bytes -
+  the panel's default `32M` to the byte, since its size parser reads every
+  suffix as binary. Both refuse at 33,554,433. The plugin stats the file first,
+  so its own message is what you see rather than the panel's generic *file too
+  large*. Note the margin is exactly **zero**: lowering
+  `PLUGINS_NODEFS_MAX_INLINE` puts the panel's limit under this gate, and the
+  refusal then comes from the panel with less to say. Both constants derive from
+  one `PANEL_MAX_INLINE_BYTES` so they cannot drift apart.
+- **A single file inside an archive.** Extraction bounds the *total*
+  uncompressed size at twice the cap and bounds no individual member, so an
+  oversized file can arrive inside a perfectly acceptable archive. Since entries
+  are uploaded one at a time, the panel would refuse that one partway through
+  and leave a half-installed plugin. Every entry is therefore checked **before
+  anything is written**, and the whole archive refused with `ENTRY_TOO_LARGE`.
+
+**Logs over 32 MiB are the one real regression, and it is not fixable here.**
+The log tail is read by downloading the whole file and keeping the last 256 KB.
+That was fine while the daemon had no ranged reads. In 4.5 a whole-file download
+past the inline limit is **refused outright** rather than truncated, so a server
+whose newest CounterStrikeSharp log has grown past 32 MiB loses the logs view,
+and the doctor route with it - both with the panel's *file too large* error.
+
+4.5 shipped the fix in the same release: `offset` and `length` on the nodefs
+`DownloadRequest`, which is exactly the windowed read this wants. The plugin
+cannot reach it. Those fields exist in the panel's own proto, while the
+`gameap-proto` commit this crate pins - still the tip of that repo's `main` -
+declares `DownloadRequest` as `node_id` + `path` alone. When the SDK catches up
+this becomes a windowed read of the tail and the ceiling goes away; until then,
+rotate the logs or raise `PLUGINS_NODEFS_MAX_INLINE`.
+
+**Rate limits** are new and on by default - nodefs 50/s with a burst of 200,
+nodecmd and servercontrol 5/s burst 20, http 20/s burst 50. The install and
+repair flows do bursts of nodefs calls, and this is the one limit here that has
+*not* been measured: unlike the size caps it cannot be read off the source, and
+wants a real install against a live panel.
 
 ## What the tab shows
 
