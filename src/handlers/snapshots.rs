@@ -1,4 +1,4 @@
-//! Snapshots of the plugin setup (plugins/ + configs/plugins/) as tarballs in
+//! Snapshots of the plugin setup (plugins/ + configs/plugins/ + shared/) as tarballs in
 //! addons/counterstrikesharp/backups/. Created before risky operations, kept
 //! to a small retention cap, restorable in one call. The tar itself runs on
 //! the node — the daemon only ships the file list, not every file's bytes.
@@ -22,8 +22,10 @@ use crate::source2::{self, paths};
 const KEEP_SNAPSHOTS: usize = 5;
 const SNAPSHOT_PREFIX: &str = "snap-";
 const SNAPSHOT_EXT: &str = ".tar";
-/// Snapshot members, relative to addons/counterstrikesharp.
-const MEMBER_DIRS: &[&str] = &["plugins", "configs/plugins"];
+/// Snapshot members, relative to addons/counterstrikesharp. shared/ belongs
+/// here too: restoring plugins without the contract assemblies they load types
+/// from leaves them failing at load.
+const MEMBER_DIRS: &[&str] = &["plugins", "configs/plugins", "shared"];
 
 fn css_abs(ctx: &ServerCtx) -> String {
     paths::join(&ctx.game_abs, source2::CSS_DIR)
@@ -101,7 +103,7 @@ pub(crate) fn create_snapshot_now<H: HostApi>(
     if members.is_empty() {
         return Err(ApiError::unprocessable(
             "NOTHING_TO_SNAPSHOT",
-            "neither plugins/ nor configs/plugins/ exists yet",
+            "none of plugins/, configs/plugins/ or shared/ exists yet",
         ));
     }
 

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use crate::handlers::ctx::ServerCtx;
+use crate::handlers::logs;
 use crate::host_api::HostApi;
 use crate::http::{ApiResult, json_response};
 use crate::model::{DoctorCheck, DoctorResponse};
@@ -135,6 +136,122 @@ pub fn handle<H: HostApi>(host: &mut H, params: &HashMap<String, String>) -> Api
                 "orphans",
                 format!("tracked but folder gone: {}", orphans.join(", ")),
             )
+        });
+
+        // shared/<Name>/<Name>.dll — the contract assemblies plugins load
+        // types from. A folder without its dll resolves to nothing at runtime.
+        let shared_abs = super::css_shared_abs(&ctx);
+        let shared_names = folder_names(host, &ctx, &shared_abs, false)?;
+        let mut shared_broken = Vec::new();
+        for name in &shared_names {
+            let folder_abs = paths::join(&shared_abs, name);
+            if host
+                .stat(ctx.node_id, &paths::join(&folder_abs, &format!("{name}.dll")))?
+                .is_some()
+            {
+                continue;
+            }
+            // CounterStrikeSharp resolves an assembly at shared/<Assembly>/
+            // <Assembly>.dll, so the folder has to carry the assembly's own
+            // name. Naming what is actually inside turns "something is wrong"
+            // into an instruction.
+            let dlls: Vec<String> = host
+                .read_dir(ctx.node_id, &folder_abs)?
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|entry| {
+                    !entry.is_dir && entry.name.to_ascii_lowercase().ends_with(".dll")
+                })
+                .map(|entry| entry.name)
+                .collect();
+            shared_broken.push(match dlls.as_slice() {
+                [] => format!("shared/{name}/ holds no .dll at all"),
+                [only] => format!(
+                    "shared/{name}/ holds {only} - rename the folder to {} so it resolves",
+                    paths::file_stem(only)
+                ),
+                many => format!(
+                    "shared/{name}/ holds {} but no {name}.dll - rename the folder to match the assembly it should provide",
+                    many.join(", ")
+                ),
+            });
+        }
+        checks.push(if !shared_broken.is_empty() {
+            warn("shared", shared_broken.join("; "))
+        } else if shared_names.is_empty() {
+            ok("shared", "no shared assemblies installed")
+        } else {
+            ok(
+                "shared",
+                format!("{} shared assemblies present", shared_names.len()),
+            )
+        });
+
+        // A plugin folder unpacked one level too high: the dotnet host only
+        // loads plugins/<Name>/<Name>.dll, so a <Name>/<Name>.dll sitting
+        // directly in the CounterStrikeSharp dir fails dependency resolution
+        // with "Failed to locate managed application".
+        const CSS_OWN_DIRS: &[&str] = &[
+            "plugins", "configs", "shared", "gamedata", "logs", "backups", "dotnet", "bin",
+        ];
+        let mut stray = Vec::new();
+        for name in folder_names(host, &ctx, &css_abs, false)? {
+            if CSS_OWN_DIRS
+                .iter()
+                .any(|known| name.eq_ignore_ascii_case(known))
+            {
+                continue;
+            }
+            let dll_abs = paths::join(
+                &paths::join(&css_abs, &name),
+                &format!("{name}.dll"),
+            );
+            if host.stat(ctx.node_id, &dll_abs)?.is_some() {
+                stray.push(name);
+            }
+        }
+        checks.push(if stray.is_empty() {
+            ok("stray", "no plugin folders outside plugins/")
+        } else {
+            fail(
+                "stray",
+                format!(
+                    "unpacked one level too high and will not load: {} - move each into plugins/",
+                    stray.join(", ")
+                ),
+            )
+        });
+
+        // A plugin that threw while loading leaves CounterStrikeSharp holding a
+        // context with no plugin instance, and every later `css_plugins load`
+        // then dies on it — so a load failure anywhere breaks hot loading
+        // everywhere, and is worth surfacing even though the log is history.
+        checks.push(match logs::newest_log_tail(host, &ctx)? {
+            None => ok("loadfail", "no CounterStrikeSharp log to read yet"),
+            Some(tail) => {
+                let failures = logs::find_load_failures(&tail.lines);
+                if failures.is_empty() {
+                    ok("loadfail", format!("no load failures in {}", tail.file_rel))
+                } else {
+                    let detail = failures
+                        .iter()
+                        .map(|failure| match &failure.missing {
+                            Some(assembly) => format!(
+                                "{} failed to load - missing assembly {assembly} (expected at shared/{assembly}/{assembly}.dll)",
+                                failure.plugin
+                            ),
+                            None => format!("{} failed to load", failure.plugin),
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    fail(
+                        "loadfail",
+                        format!(
+                            "{detail}. Fix or disable it and restart - until then hot Load fails for every plugin"
+                        ),
+                    )
+                }
+            }
         });
     }
 

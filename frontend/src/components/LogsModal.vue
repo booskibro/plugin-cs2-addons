@@ -6,7 +6,9 @@
         transform-origin="center"
         @update:show="(value: boolean) => $emit('update:show', value)"
     >
-        <div class="flex items-center gap-2 mb-2">
+        <!-- shrink-0 + nowrap: these labels are single words, and as shrinkable
+             flex items they collapsed to one character per line. -->
+        <div class="flex flex-wrap items-center gap-2 mb-2">
             <n-input
                 v-model:value="filter"
                 :placeholder="trans('logs_filter_placeholder')"
@@ -14,23 +16,28 @@
                 clearable
                 class="w-72"
             />
-            <GButton color="white" size="small" :disabled="loading" @click="refresh">
+            <GButton color="white" size="small" class="shrink-0" :disabled="loading" @click="refresh">
                 <GIcon name="refresh" /><span class="ml-1">{{ trans('retry') }}</span>
             </GButton>
-            <label class="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none">
+            <label
+                class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none"
+            >
                 <n-switch v-model:value="follow" size="small" />
                 {{ trans('logs_follow') }}
             </label>
             <a
                 v-if="file"
-                class="link !text-xs cursor-pointer"
+                class="link !text-xs shrink-0 whitespace-nowrap cursor-pointer"
                 :href="downloadHref"
                 target="_blank"
                 rel="noopener"
             >
                 {{ trans('logs_download') }}
             </a>
-            <span v-if="file" class="ml-auto text-xs text-stone-400 dark:text-stone-500 font-mono truncate">
+            <span
+                v-if="file"
+                class="ml-auto min-w-0 text-xs text-stone-400 dark:text-stone-500 font-mono truncate"
+            >
                 {{ file }}
             </span>
         </div>

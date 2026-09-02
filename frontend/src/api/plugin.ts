@@ -81,8 +81,14 @@ export async function toggleMetamodPlugin(
     serverId: number,
     name: string,
     enabled: boolean,
+    /** Required to disable the CounterStrikeSharp alias; the backend 409s otherwise. */
+    force = false,
 ): Promise<void> {
-    await axios.post(`${base(pluginId)}/servers/${serverId}/metamod/toggle`, { name, enabled });
+    await axios.post(`${base(pluginId)}/servers/${serverId}/metamod/toggle`, {
+        name,
+        enabled,
+        force,
+    });
 }
 
 export async function restartServer(pluginId: string, serverId: number): Promise<void> {

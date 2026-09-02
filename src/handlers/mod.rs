@@ -27,6 +27,24 @@ use ctx::ServerCtx;
 
 const MANIFEST_FILE_PERMISSIONS: u32 = 0o644;
 
+/// The panel's per-call nodefs limit, PLUGINS_NODEFS_MAX_INLINE, at its default.
+///
+/// GameAP 4.5 caps what one gameap-nodefs download or upload may carry, because
+/// the payload is materialized in panel memory and then copied into the guest.
+/// The default is `32M`, and the panel's ByteSize parser reads every suffix as
+/// binary (`M` = 1 << 20), so it is this number to the byte. Both comparisons
+/// are strict: something exactly this size passes, one byte more is refused
+/// outright rather than truncated.
+///
+/// Two call paths here are bounded by it, and both check against this constant
+/// rather than keeping their own copy of "32MB" - the point is that they move
+/// together if the panel's default ever does. Note the margin is exactly zero:
+/// an operator who *lowers* PLUGINS_NODEFS_MAX_INLINE puts the panel's limit
+/// below these gates, and the refusal then comes from the panel with a less
+/// useful message. Nothing here can detect that - the panel does not report its
+/// limit to the guest.
+pub(crate) const PANEL_MAX_INLINE_BYTES: u64 = 32 * 1024 * 1024;
+
 /// Unix seconds. wasm32-wasip1 backs this with the WASI clock; native tests
 /// use the OS clock.
 pub fn now_unix() -> u64 {
@@ -44,6 +62,11 @@ pub fn css_plugins_abs(ctx: &ServerCtx) -> String {
 /// Absolute path of the disabled-plugins parking dir.
 pub fn css_disabled_abs(ctx: &ServerCtx) -> String {
     paths::join(&css_plugins_abs(ctx), source2::DISABLED_DIR_NAME)
+}
+
+/// Absolute path of the shared-assemblies dir.
+pub fn css_shared_abs(ctx: &ServerCtx) -> String {
+    paths::join(&ctx.game_abs, source2::CSS_SHARED_DIR)
 }
 
 /// 409 unless addons/counterstrikesharp exists on the server.
@@ -112,14 +135,46 @@ pub(crate) fn write_archive_entries<H: HostApi>(
     entries: &[crate::source2::archive::ArchiveEntry],
     root: &crate::source2::archive::InstallRoot,
 ) -> Result<u32, ApiError> {
+    // Pre-flight, before a single byte is written. The panel refuses a nodefs
+    // upload over its inline limit, and these entries go up one at a time - so
+    // discovering an oversized one halfway through would leave a half-installed
+    // plugin, which is worse than refusing the archive outright. It is
+    // reachable without the archive itself being oversized: extraction bounds
+    // the total at MAX_TOTAL_UNCOMPRESSED, twice this limit, and nothing bounds
+    // any single member.
+    if let Some(entry) = entries
+        .iter()
+        .find(|entry| entry.data.len() as u64 > PANEL_MAX_INLINE_BYTES)
+    {
+        return Err(ApiError::unprocessable(
+            "ENTRY_TOO_LARGE",
+            format!(
+                "{} is {} bytes, over the {}-byte limit for one file; unpack this archive with the file manager instead",
+                entry.path,
+                entry.data.len(),
+                PANEL_MAX_INLINE_BYTES
+            ),
+        ));
+    }
+
     use crate::source2::archive::InstallRoot;
 
     let plugins_abs = css_plugins_abs(ctx);
+    let css_abs = paths::join(&ctx.game_abs, source2::CSS_DIR);
     let mut written = 0u32;
     let mut ensured_dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for entry in entries {
         let target_abs = match root {
             InstallRoot::GameDir => paths::join(&ctx.game_abs, &entry.path),
+            // plugins/, shared/, … keep their prefix; anything else in the
+            // archive is a plugin folder and belongs under plugins/.
+            InstallRoot::CssDir => {
+                if crate::source2::archive::is_css_dir_entry(&entry.path) {
+                    paths::join(&css_abs, &entry.path)
+                } else {
+                    paths::join(&plugins_abs, &entry.path)
+                }
+            }
             InstallRoot::PluginsDir => paths::join(&plugins_abs, &entry.path),
             InstallRoot::WrapIntoFolder(folder) => {
                 paths::join(&paths::join(&plugins_abs, folder), &entry.path)
@@ -153,17 +208,18 @@ pub(crate) fn archive_plugin_folders(
             }
             folders
         }
-        InstallRoot::GameDir => {
-            const PLUGINS_PREFIX: &str = "addons/counterstrikesharp/plugins/";
-            let mut folders = Vec::new();
+        InstallRoot::GameDir => folders_under(entries, "addons/counterstrikesharp/plugins/"),
+        InstallRoot::CssDir => {
+            // Both shapes count: under plugins/, and bare folders beside it.
+            let mut folders = folders_under(entries, "plugins/");
             for entry in entries {
-                let lower = entry.path.to_ascii_lowercase();
-                if let Some(rest) = lower
-                    .starts_with(PLUGINS_PREFIX)
-                    .then(|| &entry.path[PLUGINS_PREFIX.len()..])
-                    && let Some(folder) = rest.split('/').next()
+                if crate::source2::archive::is_css_dir_entry(&entry.path) {
+                    continue;
+                }
+                if let Some(folder) = entry.path.split('/').next()
                     && !folder.is_empty()
-                    && rest.contains('/')
+                    && entry.path.contains('/')
+                    && !folder.eq_ignore_ascii_case(source2::DISABLED_DIR_NAME)
                     && !folders
                         .iter()
                         .any(|f: &String| f.eq_ignore_ascii_case(folder))
@@ -174,6 +230,33 @@ pub(crate) fn archive_plugin_folders(
             folders
         }
     }
+}
+
+/// Plugin folder names in `<prefix><Folder>/<file>` entries. Only folders that
+/// actually carry a file are counted, and the parking dir never becomes a
+/// plugin of its own.
+fn folders_under(
+    entries: &[crate::source2::archive::ArchiveEntry],
+    prefix: &str,
+) -> Vec<String> {
+    let mut folders: Vec<String> = Vec::new();
+    for entry in entries {
+        let lower = entry.path.to_ascii_lowercase();
+        if let Some(rest) = lower
+            .starts_with(prefix)
+            .then(|| &entry.path[prefix.len()..])
+            && let Some(folder) = rest.split('/').next()
+            && !folder.is_empty()
+            && !folder.eq_ignore_ascii_case(source2::DISABLED_DIR_NAME)
+            && rest.contains('/')
+            && !folders
+                .iter()
+                .any(|f: &String| f.eq_ignore_ascii_case(folder))
+        {
+            folders.push(folder.to_string());
+        }
+    }
+    folders
 }
 
 /// Creates every missing ancestor of `file_abs` (the daemon's mk_dir is not

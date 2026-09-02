@@ -2,7 +2,7 @@
     <GModal
         :show="show"
         :title="trans('admins_title')"
-        :style="{ width: '760px' }"
+        :style="{ width: '860px' }"
         transform-origin="center"
         @update:show="(value: boolean) => $emit('update:show', value)"
     >
@@ -13,50 +13,20 @@
                     <div class="mb-2 text-xs text-stone-400 dark:text-stone-500 font-mono">
                         {{ adminsPath }}
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <div
-                            class="hidden md:grid grid-cols-[1fr_1.4fr_1.6fr_90px_32px] gap-2 text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500 px-1"
-                        >
-                            <span>{{ trans('admins_col_name') }}</span>
-                            <span>{{ trans('admins_col_identity') }}</span>
-                            <span>{{ trans('admins_col_flags') }}</span>
-                            <span>{{ trans('admins_col_immunity') }}</span>
-                            <span></span>
-                        </div>
-                        <div
-                            v-for="(admin, index) in admins"
-                            :key="index"
-                            class="grid grid-cols-1 md:grid-cols-[1fr_1.4fr_1.6fr_90px_32px] gap-2 items-center"
-                        >
-                            <n-input v-model:value="admin.name" size="small" placeholder="Nick" />
-                            <n-input
-                                v-model:value="admin.identity"
-                                size="small"
-                                placeholder="76561198..."
-                                class="font-mono"
-                            />
-                            <n-input
-                                v-model:value="admin.flags"
-                                size="small"
-                                placeholder="@css/generic, @css/ban"
-                                class="font-mono"
-                            />
-                            <n-input-number
-                                v-model:value="admin.immunity"
-                                size="small"
-                                :min="0"
-                                :max="100"
-                                :show-button="false"
-                            />
-                            <button
-                                class="text-stone-400 hover:text-red-500"
-                                :title="trans('action_delete')"
-                                @click="admins.splice(index, 1)"
-                            >
-                                <GIcon name="delete" size="sm" />
-                            </button>
-                        </div>
-                    </div>
+                    <n-data-table
+                        :columns="adminColumns"
+                        :data="admins"
+                        :row-key="rowKey"
+                        :bordered="false"
+                        :single-line="true"
+                        size="small"
+                        :max-height="380"
+                        :scroll-x="700"
+                    >
+                        <template #empty>
+                            <n-empty :description="trans('admins_empty')" size="small" class="py-4" />
+                        </template>
+                    </n-data-table>
                     <GButton color="white" size="small" class="mt-2" @click="addAdmin">
                         <i class="fa-solid fa-plus"></i><span class="ml-1">{{ trans('admins_add') }}</span>
                     </GButton>
@@ -89,14 +59,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { NInput, NInputNumber, NTabPane, NTabs } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
+import {
+    NDataTable,
+    NEmpty,
+    NInput,
+    NInputNumber,
+    NTabPane,
+    NTabs,
+    type DataTableColumns,
+} from 'naive-ui';
 import { usePluginTrans } from '@gameap/plugin-sdk';
 
 import { fmDownloadText, fmUploadFile } from '../api/gameap';
 import { apiErrorMessage } from '../api/plugin';
 
 interface AdminDraft {
+    /** Stable table row key: the name is edited, so it cannot be the key. */
+    key: number;
     name: string;
     identity: string;
     /** Comma-separated in the editor, array on disk. */
@@ -125,8 +105,93 @@ const groupsText = ref('');
 const loading = ref(false);
 const saving = ref(false);
 
+let nextKey = 0;
+
 const adminsPath = computed(() => `${props.cssDir}/configs/admins.json`);
 const groupsPath = computed(() => `${props.cssDir}/configs/admin_groups.json`);
+
+const rowKey = (row: AdminDraft): number => row.key;
+
+// Editable cells: naive-ui renders them, so the drafts stay plain objects and
+// the save path is unchanged.
+const adminColumns = computed<DataTableColumns<AdminDraft>>(() => [
+    {
+        title: trans('admins_col_name'),
+        key: 'name',
+        minWidth: 130,
+        render: (row) =>
+            h(NInput, {
+                value: row.name,
+                size: 'small',
+                placeholder: 'Nick',
+                'onUpdate:value': (value: string) => {
+                    row.name = value;
+                },
+            }),
+    },
+    {
+        title: trans('admins_col_identity'),
+        key: 'identity',
+        minWidth: 170,
+        render: (row) =>
+            h(NInput, {
+                value: row.identity,
+                size: 'small',
+                class: 'font-mono',
+                placeholder: '76561198...',
+                'onUpdate:value': (value: string) => {
+                    row.identity = value;
+                },
+            }),
+    },
+    {
+        title: trans('admins_col_flags'),
+        key: 'flags',
+        minWidth: 210,
+        render: (row) =>
+            h(NInput, {
+                value: row.flags,
+                size: 'small',
+                class: 'font-mono',
+                placeholder: '@css/generic, @css/ban',
+                'onUpdate:value': (value: string) => {
+                    row.flags = value;
+                },
+            }),
+    },
+    {
+        title: trans('admins_col_immunity'),
+        key: 'immunity',
+        width: 110,
+        render: (row) =>
+            h(NInputNumber, {
+                value: row.immunity,
+                size: 'small',
+                min: 0,
+                max: 100,
+                showButton: false,
+                'onUpdate:value': (value: number | null) => {
+                    row.immunity = value ?? 0;
+                },
+            }),
+    },
+    {
+        title: '',
+        key: 'actions',
+        width: 48,
+        align: 'center',
+        render: (row) =>
+            h(
+                'button',
+                {
+                    class: 'text-stone-400 hover:text-red-500',
+                    title: trans('action_delete'),
+                    onClick: () => removeAdmin(row.key),
+                },
+                h('i', { class: 'fa-solid fa-trash-can' }),
+            ),
+    },
+]);
 
 watch(
     () => props.show,
@@ -168,6 +233,7 @@ function parseAdmins(text: string): AdminDraft[] {
         ([name, entry]) => {
             const { identity, flags, immunity, ...extra } = entry ?? {};
             return {
+                key: nextKey++,
                 name,
                 identity: typeof identity === 'string' ? identity : '',
                 flags: Array.isArray(flags) ? flags.join(', ') : '',
@@ -200,12 +266,17 @@ function serializeAdmins(): string {
 
 function addAdmin(): void {
     admins.value.push({
+        key: nextKey++,
         name: '',
         identity: '',
         flags: '@css/generic',
         immunity: 0,
         extra: {},
     });
+}
+
+function removeAdmin(key: number): void {
+    admins.value = admins.value.filter((admin) => admin.key !== key);
 }
 
 async function save(): Promise<void> {

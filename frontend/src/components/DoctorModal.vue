@@ -2,13 +2,13 @@
     <GModal
         :show="show"
         :title="trans('doctor_title')"
-        :style="{ width: '640px' }"
+        :style="{ width: '900px' }"
         transform-origin="center"
         @update:show="(value: boolean) => $emit('update:show', value)"
     >
         <Loading v-if="loading" />
         <template v-else>
-            <div class="flex flex-col gap-1.5">
+            <div class="csa-doctor-grid" :style="gridStyle">
                 <div
                     v-for="check in allChecks"
                     :key="check.id"
@@ -87,6 +87,13 @@ async function refresh(): Promise<void> {
 
 const allChecks = computed<DoctorCheck[]>(() => [...props.frontendChecks, ...serverChecks.value]);
 
+// Two balanced columns filled top-to-bottom, so the checks keep their order
+// down the left column. The row count has to be computed: how many checks the
+// backend returns depends on what is installed.
+const gridStyle = computed(() => ({
+    '--csa-doctor-rows': String(Math.max(1, Math.ceil(allChecks.value.length / 2))),
+}));
+
 const summary = computed(() => {
     const fails = allChecks.value.filter((check) => check.status === 'fail').length;
     const warns = allChecks.value.filter((check) => check.status === 'warn').length;
@@ -126,3 +133,28 @@ function iconClass(status: DoctorCheck['status']): string {
     }
 }
 </script>
+
+<style scoped>
+/* Both layouts live here rather than in utility classes: the plugin bundle
+   carries no Tailwind of its own (only classes the panel already compiled
+   exist, and grid-auto-flow/grid-template-rows are not among them), and
+   putting `flex` from the panel's stylesheet on the same element would leave
+   display: grid fighting it for precedence. */
+.csa-doctor-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+/* Two balanced columns, filled top-to-bottom so the order reads down the
+   left column first. */
+@media (min-width: 768px) {
+    .csa-doctor-grid {
+        display: grid;
+        grid-auto-flow: column;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(var(--csa-doctor-rows, 5), auto);
+        align-content: start;
+    }
+}
+</style>

@@ -7,12 +7,22 @@
 use crate::host_api::{DirEntry, HostApi, HostApiError};
 
 pub const VDF_EXT: &str = ".vdf";
+/// CounterStrikeSharp registers itself with Metamod through this alias, so it
+/// shows up in the same list as ordinary binary plugins - but switching it off
+/// unloads the whole platform this tab manages, and every `css_` console
+/// command with it.
+pub const PLATFORM_VDF_STEM: &str = "counterstrikesharp";
 pub const DISABLED_SUFFIX: &str = ".vdf.disabled";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VdfPlugin {
     pub name: String,
     pub enabled: bool,
+}
+
+/// Whether a vdf stem is the CounterStrikeSharp registration itself.
+pub fn is_platform(name: &str) -> bool {
+    name.eq_ignore_ascii_case(PLATFORM_VDF_STEM)
 }
 
 /// Classifies one metamod-dir entry; `None` for non-VDF files (metaplugins.ini,

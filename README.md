@@ -27,7 +27,7 @@ Since 0.2.0 the plugin also:
 - edits **CounterStrikeSharp admins** (`configs/admins.json` +
   `admin_groups.json`) in a structured editor;
 - shows the **CSS log tail** with filtering, to diagnose rows in Error state;
-- takes **snapshots** of `plugins/` + `configs/plugins/` (tarballs on the
+- takes **snapshots** of `plugins/` + `configs/plugins/` + `shared/` (tarballs on the
   server, newest 5 kept) with one-click restore - also the transfer format
   for copying a setup between servers;
 - keeps an **audit history** of panel actions and shows a **restart banner**
@@ -50,6 +50,64 @@ And since 0.3.0:
 - a **Doctor** dialog running every health check in one pass: launch
   parameters, RCON, gameinfo wiring, duplicate folders, broken layouts,
   manifest orphans, ambiguous .vdf aliases, leftover downloads.
+
+And since 0.4.0:
+
+- **shared-assembly support**: release zips rooted at `plugins/` + `shared/`
+  now install (they were rejected outright before), `shared/` is captured in
+  snapshots, and the Doctor checks its layout. A plugin whose contract
+  assembly is missing throws while loading, and CounterStrikeSharp then keeps
+  a context with no plugin instance - which makes `css_plugins load` fail for
+  *every* plugin until the server restarts;
+- a **load-failure check**: the Doctor reads the CounterStrikeSharp log and
+  names any plugin that failed to load, plus the assembly it could not find;
+- **failed hot actions explain themselves**: CSS logs load errors rather than
+  answering on the console, so a failed Load now surfaces the log's last error
+  line instead of a red toast with no reason;
+- an **editable admins table** in place of the stacked list, and a Doctor
+  dialog laid out in two columns.
+
+And since 0.5.0:
+
+- **the CounterStrikeSharp alias is guarded**: `addons/metamod/counterstrikesharp.vdf`
+  appears in the Metamod plugin list like any other binary plugin, but switching
+  it off unloads the whole platform - it now carries a *platform* badge, asks for
+  confirmation, and the backend refuses the toggle without an explicit `force`;
+- **"unknown command" is understood**: when Metamod answers but CounterStrikeSharp
+  does not, the tab says so plainly - in the hint line, in a failed Load's toast
+  and as a Doctor check - instead of parsing the reply as "no plugins running"
+  and quietly showing folder state.
+
+And since 0.6.0:
+
+- **fixed**: a release zip shipping its plugin as a bare `<Name>/` folder beside
+  `shared/` unpacked the plugin one level too high, straight into
+  `addons/counterstrikesharp/`, where the dotnet host fails with "Failed to
+  locate managed application". Archive entries are now routed per top-level
+  folder - `plugins/`, `shared/`, `configs/`, `gamedata/` keep their prefix and
+  everything else lands in `plugins/`. Introduced in 0.4.0;
+- the Doctor gains a **placement check** for plugin folders sitting outside
+  `plugins/`, and its **shared-assembly check now names the dll it found**
+  (`shared/GoldKingZ/ holds GoldKingZ.Api.dll - rename the folder to
+  GoldKingZ.Api`) instead of only saying one is missing;
+- the **restart banner stops crying wolf**: it no longer counts rows that are
+  enabled on disk but not loaded, a state a plugin can sit in permanently when
+  it fails to load or its module name never matches its folder.
+
+And in 0.6.1, two fixes to how rows are matched against `css_plugins list`:
+
+- a version containing parentheses (`"RockTheVote" (1.9.6 (RELEASE))`) failed the
+  line regex, dropping that plugin from the runtime list entirely - a loaded
+  plugin showed as *Awaiting load*;
+- ModuleName is matched to the folder in three passes (exact, then prefix, then
+  a long shared opening), each running over every row before the next begins, so
+  decorated names like `PlayerSettings [Core]` or `CS2-SimpleAdmin (RELEASE)`
+  pair with their folders while `CS2-SimpleAdmin` cannot steal the entry
+  belonging to `CS2-SimpleAdmin_FunCommands`.
+
+0.6.3 and 0.6.4 are about the panel rather than the tab - the permissions the
+plugin declares under GameAP 4.5, and the file-size limits 4.5 introduced. Both
+are written up under [GameAP 4.5](#gameap-45).
 
 ## Credits
 
@@ -85,9 +143,12 @@ AND the `gameap-net` / `gameap-scheduler` host modules (current
 [gameap/gameap](https://github.com/gameap/gameap) main). Since 0.2.0 the
 plugin imports both modules, so it will not load on older panels - use a
 0.1.x build there. Related panel settings, all default-on:
-`PLUGIN_NET_ENABLED=true` (the CS2 RCON protocol; with `false` the panel
+`PLUGINS_NET_ENABLED=true` (the CS2 RCON protocol; with `false` the panel
 falls back to its built-in Source client), and plugin HTTP with `https`
 allowed (release lookups query `api.github.com` and `mms.alliedmods.net`).
+Those are the `v4.5.0-rc.1` spellings; a panel before that release calls them
+`PLUGIN_NET_ENABLED` and so on. rc.1 still accepts the older names for one
+release, with a deprecation warning in the log.
 
 **Node:** platform installs and snapshots run `curl`/`wget`, `tar` and
 `unzip` (fallbacks: `python3 -m zipfile`, `busybox unzip`) on a **linux**
@@ -108,6 +169,86 @@ node. A stock Debian/Ubuntu box has everything except possibly `unzip` -
   still works — you just lose live data (versions, Running/Stopped states,
   hot load/unload); everything file-based keeps working and a hint line
   explains what's unavailable.
+
+## GameAP 4.5
+
+The plugin runs unchanged on 4.5. Three things there are worth knowing, and one
+of them is a limit you can actually hit.
+
+**Permissions.** 4.5 gates the privileged host libraries behind grants a plugin
+declares in its manifest, and this one declares three:
+
+| Grant | For |
+| --- | --- |
+| `node_commands` | `gameap-nodecmd.execute_command` - the node-side unpack and platform installs |
+| `files` | the `gameap-nodefs` writes (`chmod`, `mk_dir`, `move`, `remove`, `upload`). It covers `files_read`, so the reads are not listed separately - the panel treats a broader grant as satisfying a narrower one and drops the subsumed entry |
+| `manage_servers` | `gameap-servercontrol.restart_server` |
+
+Nothing else needs one. `gameap-nodes.get_node` and `gameap-servers`'
+`find_servers`/`get_server` are read-only and ungated - it is the *writes* on
+those modules that need `manage_nodes` and `manage_servers`, and this plugin
+makes none. `gameap-http`, `gameap-storage`, `gameap-scheduler`, `gameap-games`
+and `gameap-log` are not gated at all.
+
+The list is not a judgement call: the panel derives what a plugin *uses* from
+its wasm import section, matched against its own policy table, and shows
+anything used-but-undeclared as a missing grant. `REQUIRED_PERMISSIONS` in
+`src/lib.rs` is checked against the panel's twelve known names by a unit test,
+because `ParsePluginPermissions` silently **drops** a name it does not
+recognise - a typo there would not fail an install, it would grant less than
+intended and surface much later as a denied call.
+
+`PLUGINS_PERMISSIONS_ENFORCE` still defaults to `false` in 4.5, so nothing is
+enforced yet; a later release turns it on.
+
+> **Panel variable names changed during 4.5.** Every plugin setting was renamed
+> `PLUGIN_*` → `PLUGINS_*` in `v4.5.0-rc.1` (PR #85). The old spelling keeps
+> working for **one release** - the panel applies it and logs a deprecation
+> warning naming the replacement, and the new name wins if both are set - so
+> this is worth getting ahead of rather than racing. This README uses the rc.1
+> names throughout. On `v4.5.0-beta.1` drop the `S`:
+> `PLUGIN_NODEFS_MAX_INLINE`. On 4.4.x none of these exist at all, because the
+> limits they control arrived with 4.5.
+
+**A 32 MiB ceiling on single file transfers.** `PLUGINS_NODEFS_MAX_INLINE`
+caps what one `gameap-nodefs` download or upload may carry, and there was no
+equivalent before. It binds two paths here:
+
+- **Zip installs.** The plugin's own `MAX_ARCHIVE_BYTES` is 33,554,432 bytes -
+  the panel's default `32M` to the byte, since its size parser reads every
+  suffix as binary. Both refuse at 33,554,433. The plugin stats the file first,
+  so its own message is what you see rather than the panel's generic *file too
+  large*. Note the margin is exactly **zero**: lowering
+  `PLUGINS_NODEFS_MAX_INLINE` puts the panel's limit under this gate, and the
+  refusal then comes from the panel with less to say. Both constants derive from
+  one `PANEL_MAX_INLINE_BYTES` so they cannot drift apart.
+- **A single file inside an archive.** Extraction bounds the *total*
+  uncompressed size at twice the cap and bounds no individual member, so an
+  oversized file can arrive inside a perfectly acceptable archive. Since entries
+  are uploaded one at a time, the panel would refuse that one partway through
+  and leave a half-installed plugin. Every entry is therefore checked **before
+  anything is written**, and the whole archive refused with `ENTRY_TOO_LARGE`.
+
+**Logs over 32 MiB are the one real regression, and it is not fixable here.**
+The log tail is read by downloading the whole file and keeping the last 256 KB.
+That was fine while the daemon had no ranged reads. In 4.5 a whole-file download
+past the inline limit is **refused outright** rather than truncated, so a server
+whose newest CounterStrikeSharp log has grown past 32 MiB loses the logs view,
+and the doctor route with it - both with the panel's *file too large* error.
+
+4.5 shipped the fix in the same release: `offset` and `length` on the nodefs
+`DownloadRequest`, which is exactly the windowed read this wants. The plugin
+cannot reach it. Those fields exist in the panel's own proto, while the
+`gameap-proto` commit this crate pins - still the tip of that repo's `main` -
+declares `DownloadRequest` as `node_id` + `path` alone. When the SDK catches up
+this becomes a windowed read of the tail and the ceiling goes away; until then,
+rotate the logs or raise `PLUGINS_NODEFS_MAX_INLINE`.
+
+**Rate limits** are new and on by default - nodefs 50/s with a burst of 200,
+nodecmd and servercontrol 5/s burst 20, http 20/s burst 50. The install and
+repair flows do bursts of nodefs calls, and this is the one limit here that has
+*not* been measured: unlike the size caps it cannot be read off the source, and
+wants a real install against a live panel.
 
 ## What the tab shows
 
@@ -203,6 +344,8 @@ POST   /servers/{id}/snapshots/restore   {name}
 DELETE /servers/{id}/snapshots           {name}
 GET    /servers/{id}/audit               recent panel actions
 POST   /servers/{id}/plugins/install-archive  {path, force?}  install uploaded zip
+                                                              (32 MiB max, and no single
+                                                               file inside it over that)
 GET    /servers/{id}/doctor              server-side health checks
 ```
 
@@ -212,9 +355,13 @@ game code `cs2` (transport: plugin, wire I/O over the `gameap-net` host
 library), and a **ScheduledTaskHandler** with two tasks -
 `cs2addons-gameinfo-autorepair` (6h) and `cs2addons-update-check` (24h).
 
-The tab is shown only on Source-engine servers and requires the
-`plugin:mnzteylemrxw4:manage` ability (granted to admins automatically); the
-backend additionally verifies engine `source` version `2`.
+The tab is shown only on Source 2 servers - gated on game code `cs2`, because
+the panel's tab check matches engine or code and has no engine-version field,
+while Source 1 games share the engine string `Source` - and requires the
+`plugin:mnzteylemrxw4:manage` ability (granted to admins automatically). The
+backend independently verifies engine `source` version `2` on every route. A
+custom game entry with a different code needs adding to `codes` in
+`frontend/src/index.ts`.
 
 ## Install
 
@@ -250,9 +397,9 @@ On Windows, `make wasm` translates to
 
 - **The Plugins tab doesn't appear** — check, in order: the plugin is listed
   under Administration → Plugins and the panel was restarted; the server's
-  game is `cs2` (the tab is gated on engine `source`, and the backend
-  additionally requires engine version `2` — a custom game entry with a
-  different engine string won't show it); your user has admin rights (the
+  game code is exactly `cs2` (the tab is gated on that code, so a custom or
+  cloned game entry with a different code won't show it — add it to `codes` in
+  `frontend/src/index.ts`); your user has admin rights (the
   `plugin:mnzteylemrxw4:manage` ability is granted to admins automatically).
 - **"could not locate the game directory"** (422 on load) — the server dir
   doesn't contain `game/csgo/gameinfo.gi` (or any `game/*/gameinfo.gi`).
@@ -309,9 +456,9 @@ frontend/                   Vue 3 frontend (vite lib build, embedded into the wa
 └── src/api/                clients for the wasm routes and existing panel endpoints
 ```
 
-Tests: `cargo test` (68 backend tests run natively against the mock node — no
+Tests: `cargo test` (89 backend tests run natively against the mock node — no
 panel needed, including the tolerant-RCON engine over scripted byte streams)
-and `cd frontend && npm test` (22 vitest tests for the parsers and status
+and `cd frontend && npm test` (37 vitest tests for the parsers and status
 logic).
 
 ## Feature mapping from the original

@@ -7,10 +7,10 @@ export const cs2AddonsPlugin: PluginDefinition = {
     // normalization (valid base32, a-z2-7): base32("cs2addon").
     id: 'mnzteylemrxw4',
     name: 'CS2 Addons',
-    version: '0.3.4',
+    version: '0.6.4',
     apiVersion: '1.0',
     description: 'Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers',
-    author: 'BooskiBro (after gameap/plugin-goldsrc-addons by GameAP)',
+    author: 'SilverSasquatchGameAPDev',
 
     translations: {
         en: {
@@ -152,6 +152,10 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             vdf_plugins: 'Metamod plugins',
             vdf_hint: 'Toggling renames the .vdf; applies on the next restart.',
+            vdf_platform_badge: 'platform',
+            vdf_platform_title: 'Disable CounterStrikeSharp itself?',
+            vdf_platform_text:
+                'This alias registers CounterStrikeSharp with Metamod. Switching it off unloads the whole platform at the next restart: every CSS plugin stops and this tab loses live statuses and hot load/unload. Disable it anyway?',
             vdf_enabled: 'Metamod plugin ":name" enabled - applies after restart',
             vdf_disabled: 'Metamod plugin ":name" disabled - applies after restart',
 
@@ -199,6 +203,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             admins_col_flags: 'Flags',
             admins_col_immunity: 'Immunity',
             admins_add: 'Add admin',
+            admins_empty: 'No admins yet',
             admins_hint:
                 'Flags are comma-separated (e.g. @css/generic, @css/ban). Changes apply on map change or css_admins_reload.',
             admins_parse_failed: 'admins.json could not be parsed - fix it via the file manager',
@@ -216,6 +221,8 @@ export const cs2AddonsPlugin: PluginDefinition = {
                 'RCON cannot work: the launch parameters are missing -usercon. Add it in Launch Settings and restart.',
             rcon_metamod_not_loaded:
                 'The console works, but Metamod is not loaded in the running server - restart the server to load it.',
+            rcon_css_not_loaded:
+                'Metamod is loaded but CounterStrikeSharp is not, so the console does not know css_plugins. Live statuses and hot load/unload are unavailable. Check that addons/metamod/counterstrikesharp.vdf is enabled and restart the server.',
 
             action_reload: 'Reload',
             reloaded_ok: 'Plugin ":name" reloaded',
@@ -237,6 +244,10 @@ export const cs2AddonsPlugin: PluginDefinition = {
             doctor_usercon_missing:
                 'The launch parameters are missing -usercon; RCON cannot work without it',
             doctor_rcon_ok: 'Console reachable, live data flowing',
+            doctor_check_cssloaded: 'CounterStrikeSharp loaded',
+            doctor_css_loaded_ok: 'Loaded in the running server and answering css_plugins',
+            doctor_css_not_loaded:
+                'Installed on disk but not loaded in the running server - every row below shows its folder state only. Check addons/metamod/counterstrikesharp.vdf and restart.',
             doctor_check_usercon: 'Launch parameters',
             doctor_check_rcon: 'RCON console',
             doctor_check_metamod: 'Metamod:Source',
@@ -245,6 +256,9 @@ export const cs2AddonsPlugin: PluginDefinition = {
             doctor_check_duplicates: 'Enabled/disabled conflicts',
             doctor_check_layout: 'Plugin folder layout',
             doctor_check_orphans: 'Manifest consistency',
+            doctor_check_shared: 'Shared assemblies',
+            doctor_check_stray: 'Plugin folder placement',
+            doctor_check_loadfail: 'Plugin load failures',
             doctor_check_vdf: 'Metamod plugin aliases',
             doctor_check_scratch: 'Download leftovers',
 
@@ -393,6 +407,10 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             vdf_plugins: 'Плагины Metamod',
             vdf_hint: 'Переключение переименовывает .vdf; применится после перезапуска.',
+            vdf_platform_badge: 'платформа',
+            vdf_platform_title: 'Отключить сам CounterStrikeSharp?',
+            vdf_platform_text:
+                'Этот alias регистрирует CounterStrikeSharp в Metamod. Его отключение выгрузит всю платформу при следующем перезапуске: все CSS-плагины остановятся, а вкладка потеряет живые статусы и горячую загрузку. Всё равно отключить?',
             vdf_enabled: 'Metamod-плагин «:name» включён - применится после перезапуска',
             vdf_disabled: 'Metamod-плагин «:name» выключен - применится после перезапуска',
 
@@ -440,6 +458,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             admins_col_flags: 'Флаги',
             admins_col_immunity: 'Иммунитет',
             admins_add: 'Добавить админа',
+            admins_empty: 'Администраторов пока нет',
             admins_hint:
                 'Флаги через запятую (например @css/generic, @css/ban). Применяется на смене карты или по css_admins_reload.',
             admins_parse_failed: 'admins.json не разбирается - исправьте его через файловый менеджер',
@@ -457,6 +476,8 @@ export const cs2AddonsPlugin: PluginDefinition = {
                 'RCON не может работать: в параметрах запуска нет -usercon. Добавьте его в настройках запуска и перезапустите сервер.',
             rcon_metamod_not_loaded:
                 'Консоль работает, но Metamod не загружен на запущенном сервере - перезапустите сервер.',
+            rcon_css_not_loaded:
+                'Metamod загружен, а CounterStrikeSharp - нет, поэтому консоль не знает команду css_plugins. Живые статусы и горячая загрузка недоступны. Проверьте, что addons/metamod/counterstrikesharp.vdf включён, и перезапустите сервер.',
 
             action_reload: 'Перезагрузить',
             reloaded_ok: 'Плагин «:name» перезагружен',
@@ -478,6 +499,10 @@ export const cs2AddonsPlugin: PluginDefinition = {
             doctor_usercon_missing:
                 'В параметрах запуска нет -usercon; без него RCON не работает',
             doctor_rcon_ok: 'Консоль доступна, данные идут',
+            doctor_check_cssloaded: 'CounterStrikeSharp загружен',
+            doctor_css_loaded_ok: 'Загружен на запущенном сервере, отвечает на css_plugins',
+            doctor_css_not_loaded:
+                'Установлен на диске, но не загружен на запущенном сервере - строки ниже показывают только состояние папок. Проверьте addons/metamod/counterstrikesharp.vdf и перезапустите сервер.',
             doctor_check_usercon: 'Параметры запуска',
             doctor_check_rcon: 'Консоль RCON',
             doctor_check_metamod: 'Metamod:Source',
@@ -486,6 +511,9 @@ export const cs2AddonsPlugin: PluginDefinition = {
             doctor_check_duplicates: 'Конфликты вкл/выкл',
             doctor_check_layout: 'Структура папок плагинов',
             doctor_check_orphans: 'Согласованность манифеста',
+            doctor_check_shared: 'Общие сборки',
+            doctor_check_stray: 'Расположение папок плагинов',
+            doctor_check_loadfail: 'Ошибки загрузки плагинов',
             doctor_check_vdf: 'Алиасы плагинов Metamod',
             doctor_check_scratch: 'Остатки загрузок',
 
@@ -509,8 +537,14 @@ export const cs2AddonsPlugin: PluginDefinition = {
                     type: 'hasServerPermissions',
                     permissions: ['plugin:mnzteylemrxw4:manage'],
                 },
+                // Source 2 only. It has to be by game code, not engine:
+                // Source 1 and Source 2 games share the engine string "Source",
+                // GameCheck has no engine-version field, and the panel ORs
+                // engines with codes - so listing the engine at all would let
+                // every Source 1 server back in. The backend enforces the real
+                // rule (engine source, version 2) on every route regardless.
                 checkGame: {
-                    engines: ['Source'],
+                    codes: ['cs2'],
                 },
             },
         ],

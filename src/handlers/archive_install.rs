@@ -14,8 +14,12 @@ use crate::http::{ApiError, ApiResult, json_response, parse_json_body};
 use crate::model::{InstallArchiveRequest, InstallArchiveResponse};
 use crate::source2::{archive, paths};
 
-/// Zip size cap: the whole archive is inflated in wasm memory.
-const MAX_ARCHIVE_BYTES: u64 = 32 * 1024 * 1024;
+/// Archive size cap: the whole archive is inflated in wasm memory, and the
+/// download that fetches it is a single nodefs call, so the panel's inline
+/// limit binds it too. Deliberately the same number rather than a second
+/// opinion - this gate stats the file first and refuses with a message saying
+/// what to do instead, where the panel's refusal is a generic "file too large".
+const MAX_ARCHIVE_BYTES: u64 = super::PANEL_MAX_INLINE_BYTES;
 
 pub fn handle<H: HostApi>(
     host: &mut H,

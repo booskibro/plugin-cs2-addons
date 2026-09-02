@@ -484,6 +484,48 @@ fn repair_wires_gameinfo_and_audits() {
 
 // ---------------------------------------------------------------- metamod vdf
 
+/// The CounterStrikeSharp alias is a platform switch, not a plugin row.
+#[test]
+fn metamod_toggle_guards_the_platform_vdf() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/addons/metamod/counterstrikesharp.vdf"), b"vdf");
+
+    let (status, body) = body_json(crate::handlers::metamod::handle(
+        &mut host,
+        &params("3"),
+        br#"{"name": "counterstrikesharp", "enabled": false}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["code"], "PLATFORM_VDF");
+    assert!(
+        host.file(&format!("{GAME}/addons/metamod/counterstrikesharp.vdf")).is_some(),
+        "the alias must still be live after a refused toggle"
+    );
+
+    // Explicit force still goes through - the guard is a speed bump, not a wall.
+    let (status, body) = body_json(crate::handlers::metamod::handle(
+        &mut host,
+        &params("3"),
+        br#"{"name": "counterstrikesharp", "enabled": false, "force": true}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    assert!(host
+        .file(&format!("{GAME}/addons/metamod/counterstrikesharp.vdf.disabled"))
+        .is_some());
+
+    // Re-enabling never needs force.
+    let (status, body) = body_json(crate::handlers::metamod::handle(
+        &mut host,
+        &params("3"),
+        br#"{"name": "counterstrikesharp", "enabled": true}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+}
+
 #[test]
 fn metamod_toggle_renames_vdf() {
     let mut host = MockHost::cs2();
@@ -661,6 +703,116 @@ fn snapshot_restore_rejects_bad_names() {
 }
 
 // ---------------------------------------------------------------- catalog
+
+/// A shared-API release: the plugin plus the contract assembly it needs.
+fn shared_api_zip() -> Vec<u8> {
+    use std::io::Write;
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut cursor);
+        for name in [
+            "plugins/PlayerSettings/PlayerSettings.dll",
+            "shared/PlayerSettingsApi/PlayerSettingsApi.dll",
+        ] {
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .expect("start");
+            writer.write_all(b"MZ").expect("write");
+        }
+        writer.finish().expect("finish");
+    }
+    cursor.into_inner()
+}
+
+/// The layout that used to be rejected outright, leaving the contract assembly
+/// uninstalled and the plugin failing to load.
+#[test]
+fn archive_install_places_shared_assemblies() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file("/srv/gameap/servers/cs2/upload/PlayerSettings.zip", &shared_api_zip());
+
+    let (status, body) = body_json(crate::handlers::archive_install::handle(
+        &mut host,
+        &params("3"),
+        br#"{"path": "upload/PlayerSettings.zip"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["files_written"], 2);
+    assert!(host
+        .file(&format!(
+            "{GAME}/addons/counterstrikesharp/plugins/PlayerSettings/PlayerSettings.dll"
+        ))
+        .is_some());
+    assert!(host
+        .file(&format!(
+            "{GAME}/addons/counterstrikesharp/shared/PlayerSettingsApi/PlayerSettingsApi.dll"
+        ))
+        .is_some());
+    // Only the plugin is registered - shared/ is not a plugin folder.
+    assert_eq!(body["folders"].as_array().expect("folders").len(), 1);
+    assert_eq!(body["folders"][0], "PlayerSettings");
+}
+
+/// A plugin folder shipped BESIDE shared/, rather than under plugins/ - the
+/// shape that used to land the plugin one level too high, directly in
+/// addons/counterstrikesharp, where the dotnet host cannot resolve it.
+fn bare_folder_with_shared_zip() -> Vec<u8> {
+    use std::io::Write;
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut cursor);
+        for name in [
+            "MenuManagerCore/MenuManagerCore.dll",
+            "shared/MenuManagerApi/MenuManagerApi.dll",
+        ] {
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .expect("start");
+            writer.write_all(b"MZ").expect("write");
+        }
+        writer.finish().expect("finish");
+    }
+    cursor.into_inner()
+}
+
+#[test]
+fn archive_install_puts_bare_folders_under_plugins() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(
+        "/srv/gameap/servers/cs2/upload/MenuManager.zip",
+        &bare_folder_with_shared_zip(),
+    );
+
+    let (status, body) = body_json(crate::handlers::archive_install::handle(
+        &mut host,
+        &params("3"),
+        br#"{"path": "upload/MenuManager.zip"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    // The plugin belongs under plugins/, the contract assembly under shared/.
+    assert!(host
+        .file(&format!(
+            "{GAME}/addons/counterstrikesharp/plugins/MenuManagerCore/MenuManagerCore.dll"
+        ))
+        .is_some());
+    assert!(host
+        .file(&format!(
+            "{GAME}/addons/counterstrikesharp/shared/MenuManagerApi/MenuManagerApi.dll"
+        ))
+        .is_some());
+    // Never directly in the CounterStrikeSharp dir.
+    assert!(host
+        .file(&format!(
+            "{GAME}/addons/counterstrikesharp/MenuManagerCore/MenuManagerCore.dll"
+        ))
+        .is_none());
+    assert_eq!(body["folders"].as_array().expect("folders").len(), 1);
+    assert_eq!(body["folders"][0], "MenuManagerCore");
+}
 
 fn catalog_zip() -> Vec<u8> {
     use std::io::Write;
@@ -967,6 +1119,49 @@ fn catalog_install_snapshots_first() {
 
 // ---------------------------------------------------------------- doctor
 
+/// The two placement faults that make a plugin silently never load: a folder
+/// unpacked above plugins/, and a shared folder whose name does not match the
+/// assembly inside it.
+#[test]
+fn doctor_flags_misplaced_folders_and_names_the_shared_dll() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    add_plugin(&mut host, "MatchZy");
+    // Unpacked one level too high.
+    host.add_file(
+        &format!("{GAME}/addons/counterstrikesharp/MenuManagerCore/MenuManagerCore.dll"),
+        b"MZ",
+    );
+    // Folder name does not match the assembly it holds.
+    host.add_file(
+        &format!("{GAME}/addons/counterstrikesharp/shared/GoldKingZ/GoldKingZ.Api.dll"),
+        b"MZ",
+    );
+
+    let (status, body) = body_json(crate::handlers::doctor::handle(&mut host, &params("3")));
+    assert_eq!(status, 200);
+    let checks = body["checks"].as_array().expect("checks");
+    let by_id = |id: &str| {
+        checks
+            .iter()
+            .find(|c| c["id"] == id)
+            .unwrap_or_else(|| panic!("{id} check present"))
+    };
+
+    assert_eq!(by_id("stray")["status"], "fail");
+    let stray_detail = by_id("stray")["detail"].as_str().expect("detail");
+    assert!(stray_detail.contains("MenuManagerCore"), "{stray_detail}");
+
+    assert_eq!(by_id("shared")["status"], "warn");
+    let shared_detail = by_id("shared")["detail"].as_str().expect("detail");
+    // The point of the check: say which dll is there and what to rename to.
+    assert!(shared_detail.contains("GoldKingZ.Api.dll"), "{shared_detail}");
+    assert!(
+        shared_detail.contains("rename the folder to GoldKingZ.Api"),
+        "{shared_detail}"
+    );
+}
+
 #[test]
 fn doctor_flags_duplicates_and_unwired_gameinfo() {
     let mut host = MockHost::cs2();
@@ -1031,4 +1226,59 @@ fn audit_route_returns_recorded_entries() {
     assert_eq!(body["entries"][0]["action"], "plugin-disable");
     assert_eq!(body["entries"][0]["subject"], "MatchZy");
     assert_eq!(body["entries"][0]["user"], "john");
+}
+
+// ------------------------------------------- archive entry size guard
+
+/// An entry at exactly the panel's inline limit, and one byte over it.
+fn sized_entry(path: &str, len: u64) -> crate::source2::archive::ArchiveEntry {
+    crate::source2::archive::ArchiveEntry {
+        path: path.to_string(),
+        data: vec![0u8; len as usize],
+        mode: 0o644,
+    }
+}
+
+#[test]
+fn an_entry_over_the_panel_inline_limit_is_refused_before_anything_is_written() {
+    // Extraction bounds an archive's TOTAL uncompressed size at twice the
+    // panel's per-call upload limit and bounds no single member, so one
+    // oversized file is reachable from an archive that is itself acceptable.
+    // Uploading entry by entry, the panel would refuse that one partway
+    // through and leave a half-installed plugin behind; the guard turns it
+    // into a refusal with nothing written.
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    let ctx = crate::handlers::ctx::ServerCtx::resolve(&mut host, &params("3")).expect("ctx");
+    let before = host.files.len();
+
+    let entries = vec![
+        sized_entry("ok.txt", 8),
+        sized_entry("huge.bin", crate::handlers::PANEL_MAX_INLINE_BYTES + 1),
+    ];
+
+    let err = crate::handlers::write_archive_entries(&mut host, &ctx, &entries, &crate::source2::archive::InstallRoot::GameDir)
+        .expect_err("an entry over the inline limit must be refused");
+
+    assert_eq!(err.status, 422);
+    // Not even the small entry ahead of it — the check runs before the loop.
+    assert_eq!(host.files.len(), before, "nothing may be written");
+}
+
+#[test]
+fn an_entry_exactly_at_the_panel_inline_limit_is_written() {
+    // The panel's own comparison is strict — its tests pin 4096 bytes against
+    // a 4096 cap as an accepted upload — so the boundary value has to pass
+    // here too, or the two disagree at exactly one size and the guard refuses
+    // a file the panel would have taken.
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    let ctx = crate::handlers::ctx::ServerCtx::resolve(&mut host, &params("3")).expect("ctx");
+
+    let entries = vec![sized_entry("exact.bin", crate::handlers::PANEL_MAX_INLINE_BYTES)];
+
+    let written = crate::handlers::write_archive_entries(&mut host, &ctx, &entries, &crate::source2::archive::InstallRoot::GameDir)
+        .expect("the boundary value is not over the limit");
+
+    assert_eq!(written, 1);
 }

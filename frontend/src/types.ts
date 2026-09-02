@@ -25,6 +25,8 @@ export interface CssPluginEntry {
 export interface MetamodPluginEntry {
     name: string;
     enabled: boolean;
+    /** The CounterStrikeSharp registration itself, not a plugin. */
+    platform: boolean;
 }
 
 export interface MetamodState {
