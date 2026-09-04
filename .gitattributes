@@ -1,0 +1,10 @@
+# Line endings: LF in git and in every working tree, on every platform.
+# Both this repo and its plugin-source-addons sibling already store LF; this
+# keeps checkouts from drifting per-machine (a Git for Windows install sets
+# core.autocrlf=true system-wide) so local builds match CI, which runs on
+# ubuntu-latest, and cross-repo diffs against the sibling stay readable.
+* text=auto eol=lf
+
+# Build outputs are gitignored, but if one is ever committed deliberately
+# git must not touch its bytes.
+*.wasm binary
