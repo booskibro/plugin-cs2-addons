@@ -21,7 +21,7 @@ pub struct SweepStats {
 
 pub fn autorepair_sweep<H: HostApi>(host: &mut H) -> SweepStats {
     let mut stats = SweepStats::default();
-    let servers = match host.find_servers_by_game("cs2") {
+    let servers = match host.find_servers_by_game(crate::GAME_CODE) {
         Ok(servers) => servers,
         Err(err) => {
             host.log_error(&format!("autorepair: server listing failed: {err:?}"));

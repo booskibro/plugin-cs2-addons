@@ -11,6 +11,7 @@
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
+pub mod consistency;
 pub mod handlers;
 pub mod host_api;
 pub mod http;
@@ -32,6 +33,14 @@ use crate::host_api::HostApi;
 // paths and the plugin:<id>:manage ability the tab is gated on.
 // "mnzteylemrxw4" is base32("cs2addon") and is round-trip stable.
 pub const PLUGIN_ID: &str = "mnzteylemrxw4";
+
+/// The GameAP game code this plugin is for.
+///
+/// Written in three places that cannot import one another: the auto-repair
+/// sweep's server lookup, the RCON protocol's `game_codes`, and the frontend
+/// tab's `checkGame.codes`. Both Rust copies read this const; the frontend one
+/// is pinned to it by `consistency::game_code_matches_the_frontend_tab_gate`.
+pub const GAME_CODE: &str = "cs2";
 
 /// The grants this plugin needs, as GameAP 4.5 names them.
 ///

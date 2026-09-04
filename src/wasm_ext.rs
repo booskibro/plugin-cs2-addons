@@ -176,7 +176,7 @@ pub extern "C" fn protocol_service_get_rcon_protocols(ptr: u32, size: u32) -> u6
             protocols: vec![protocol::RconProtocol {
                 id: RCON_PROTOCOL_ID.into(),
                 name: "CS2-tolerant Source RCON".into(),
-                game_codes: vec!["cs2".into()],
+                game_codes: vec![crate::GAME_CODE.into()],
                 engines: Vec::new(),
                 transport: protocol::RconTransport::Plugin as i32,
                 players: Some(protocol::PlayerCapability {
