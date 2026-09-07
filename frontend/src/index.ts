@@ -166,7 +166,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             execstack_fixed:
                 'Cleared the executable-stack flag on :path. Restart the server to load it.',
             execstack_already_clear:
-                'The executable-stack flag was already clear on :path, so that is not what is stopping it loading.',
+                'The executable-stack flag is already clear on :path. If CounterStrikeSharp still is not loading, something else is stopping it.',
             platform_installing: 'Installing…',
             platform_update: 'Update to v:version',
             platform_install_title: 'Install :name?',
@@ -429,7 +429,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             execstack_fixed:
                 'Флаг исполняемого стека снят с :path. Перезапустите сервер, чтобы библиотека загрузилась.',
             execstack_already_clear:
-                'Флаг исполняемого стека на :path и так снят - значит, загрузку останавливает не он.',
+                'Флаг исполняемого стека на :path уже снят. Если CounterStrikeSharp всё ещё не загружается, причина в другом.',
             platform_installing: 'Установка…',
             platform_update: 'Обновить до v:version',
             platform_install_title: 'Установить :name?',

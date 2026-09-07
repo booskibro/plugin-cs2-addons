@@ -15,10 +15,14 @@ use crate::model::{InstallArchiveRequest, InstallArchiveResponse};
 use crate::source2::{archive, paths};
 
 /// Archive size cap: the whole archive is inflated in wasm memory, and the
-/// download that fetches it is a single nodefs call, so the panel's inline
-/// limit binds it too. Deliberately the same number rather than a second
-/// opinion - this gate stats the file first and refuses with a message saying
-/// what to do instead, where the panel's refusal is a generic "file too large".
+/// download that fetches it is a single nodefs read, so the read gate binds it
+/// too. Deliberately the same number rather than a second opinion - this gate
+/// stats the file first and refuses with a message saying what to do instead,
+/// where the panel's refusal is a generic "file too large".
+///
+/// Note this bounds the archive, not its contents: a zip well under it can
+/// still hold a member too large to write to the node, which is why
+/// write_archive_entries has a gate of its own against a much lower number.
 const MAX_ARCHIVE_BYTES: u64 = super::PANEL_MAX_INLINE_BYTES;
 
 pub fn handle<H: HostApi>(

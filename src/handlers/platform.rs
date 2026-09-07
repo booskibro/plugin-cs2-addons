@@ -66,7 +66,7 @@ pub fn handle<H: HostApi>(
 /// The daemon shellquote-splits exec commands and we cannot verify its quote
 /// handling from here, so paths that would split wrong are refused outright
 /// instead of corrupting a command (the a2fa179 lesson: no shell, no games).
-fn require_exec_safe(path: &str) -> Result<(), ApiError> {
+pub(super) fn require_exec_safe(path: &str) -> Result<(), ApiError> {
     if path.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'') {
         return Err(ApiError::unprocessable(
             "UNSAFE_PATH",
