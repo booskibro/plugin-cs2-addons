@@ -64,6 +64,19 @@ groups set in the panel and in game stay in sync. Neither requires the other.
 
 ## Quick start
 
+### From the plugin store
+
+1. In your GameAP panel: **Administration → Plugins**, open the **Store** tab,
+   find this plugin and install it. The panel fetches it from
+   [plugins.gameap.dev](https://plugins.gameap.dev) and reloads.
+2. Open any **Counter-Strike 2** server — a **Plugins** tab appears next to the
+   server's other tabs (admins only).
+
+### From the `.wasm`
+
+For a panel without store access, a version other than the current one, or a
+build of your own.
+
 1. Get `cs2-addons.wasm` from the [latest release](../../releases/latest) —
    it is attached to every release as a downloadable asset. (Unreleased
    builds are also produced by CI as the `cs2-addons-wasm` artifact of an
@@ -74,6 +87,10 @@ groups set in the panel and in game stay in sync. Neither requires the other.
 3. Restart the panel.
 4. Open any **Counter-Strike 2** server — a **Plugins** tab appears next to
    the server's other tabs (admins only).
+
+No **Plugins** tab? Restart the panel, and check the server's game is the stock
+`cs2` — the tab is gated on engine `source` v2 and will not appear on anything
+else.
 
 ## Requirements
 
