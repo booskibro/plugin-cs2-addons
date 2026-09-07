@@ -169,6 +169,14 @@ jobs:
           if [ "$PRERELEASE" != "true" ]; then
             ARGS+=(-F "is_stable=true")
           fi
+          # submit defaults to TRUE on the API: an upload would go straight to
+          # the review queue. Uploading as a draft instead leaves a checkpoint
+          # where the store's rendering of the changelog, the file hash and the
+          # metadata can be read back before a reviewer sees them - which
+          # matters because a version is immutable once uploaded and its number
+          # can never be reused. Submit from the plugin page when it looks
+          # right. Change to true here to submit automatically.
+          ARGS+=(-F "submit=false")
           # No trailing slash: the router answers .../versions/ with a 301 and
           # curl does not replay the POST body on a redirect.
           curl "${ARGS[@]}"             "https://plugins.gameap.dev/api/ci/plugins/${GAMEAP_PLUGIN_ID}/versions"
