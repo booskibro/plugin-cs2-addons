@@ -13,7 +13,61 @@ describe is in the shipped plugin — not because those artifacts are available.
 
 ## 1.0.0 — first public release *(released)*
 
-Published on **plugins.gameap.dev**. No functional change to the tab itself.
+Published on **plugins.gameap.dev**. The store move was meant to be all this
+was, and four release candidates on a live server turned it into the release
+where CounterStrikeSharp actually loads.
+
+### CounterStrikeSharp would not load
+
+The whole of it: CSS was installed correctly, `meta list` reported it as
+`<ERROR>`, every `css_` console command was gone, and reinstalling fetched the
+same broken file. Four candidates chasing one cause.
+
+- **Fix executable stack.** CounterStrikeSharp ships releases whose
+  `counterstrikesharp.so` marks `PT_GNU_STACK` executable. Current kernels
+  refuse that on `dlopen`, so the platform fails to load while every file on
+  disk looks perfect. The documented remedies are `execstack -c` and
+  `patchelf --clear-execstack`; `execstack` shipped in `prelink`, which recent
+  distributions dropped, so the fix is missing on exactly the systems new
+  enough to need it. The plugin locates the four-byte `p_flags` field itself
+  and clears `PF_X` on the node.
+- **Four bytes, not nine megabytes.** The first two attempts at that write
+  failed, and rc.2's *request cancelled* was misread as the panel abandoning
+  the request on navigation. It was not: uploading the 9.7MB patched library
+  severed the daemon's gRPC session, which the panel log named at the exact
+  second of all three attempts. Only the four changed bytes travel now — up as
+  a scratch file, into place with `dd conv=notrunc`, read back with `od`.
+- **The read-back needed its own fix.** On the first live run the repair landed
+  and still reported failure: the check scanned od's output for anything
+  parseable as hex and took the `4` out of its own `-N 4`. It now accepts
+  exactly four two-digit hex tokens, so a surprise skips the check rather than
+  calling a good write corrupt.
+- **The Doctor asks Metamod** why a platform failed to load rather than
+  inferring it from the files, and reports what Metamod says.
+- **Reinstall** for a platform that is installed but not loading — previously
+  the only platform button was Install, which an installed platform never
+  showed, so there was no way to replace a bad file from the tab.
+- **Install latest** returns for a `counterstrikesharp/` directory that exists
+  but is empty, which a failed install leaves behind.
+
+### Writes to the node have a real limit now
+
+The same mistaken assumption was gating archive installs.
+
+- **A single file inside an uploaded zip** was checked against the 32MB read
+  limit, far above what the daemon will accept on one write, so an archive
+  holding one large `.dll` would have found this the hard way. The gate is now
+  `MAX_NODE_WRITE_BYTES`, just under 4MiB.
+- **`PANEL_MAX_INLINE_BYTES` keeps its number and its job** bounding reads, and
+  its comment no longer describes a panel setting that could not be found in
+  the source. What is documented there now is what was actually verified.
+- **Long writes are not cancelled by navigating away.** The panel's axios
+  instance aborts in-flight requests of a route on navigation unless the caller
+  supplies its own signal. Reads should be cancelled; a write that is abandoned
+  client-side while it continues server-side should not, so the writes now
+  carry a signal that is never fired.
+
+### The store move
 
 - **The plugin id changed** from `mnzteylemrxw4` — hand-picked as
   base32("cs2addon") back when it only had to be unique on one panel — to
