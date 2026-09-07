@@ -27,12 +27,16 @@ use gameap_plugin_sdk::{Plugin, PluginError, register_plugin};
 
 use crate::host_api::HostApi;
 
-// The panel normalizes plugin ids (CompactPluginID): the id must decode as
-// base32 (alphabet a-z2-7, no padding — so 2/4/5/7/8/10/12/13 chars) and
-// re-encode to itself, or it is rewritten to an FNV hash, which breaks route
-// paths and the plugin:<id>:manage ability the tab is gated on.
-// "mnzteylemrxw4" is base32("cs2addon") and is round-trip stable.
-pub const PLUGIN_ID: &str = "mnzteylemrxw4";
+// Assigned by plugins.gameap.dev when the plugin was registered, and fixed for
+// the life of the listing: the same id addresses the plugin in the store, in
+// the CI upload endpoint and in this panel.
+//
+// The panel also normalizes ids (CompactPluginID): an id must decode as base32
+// (alphabet a-z2-7, no padding — so 2/4/5/7/8/10/12/13 chars) and re-encode to
+// itself, or it is rewritten to an FNV hash, which breaks route paths and the
+// plugin:<id>:manage ability the tab is gated on. This one round-trips, and
+// consistency.rs proves it rather than trusting the store to have been careful.
+pub const PLUGIN_ID: &str = "kgebvqj6rsfh4";
 
 /// The GameAP game code this plugin is for.
 ///
@@ -136,7 +140,7 @@ impl<H: HostApi> Plugin for Cs2Addons<H> {
         _req: pb::GetServerAbilitiesRequest,
     ) -> Result<pb::GetServerAbilitiesResponse, PluginError> {
         // Admins get plugin abilities automatically; the frontend tab is
-        // gated on plugin:mnzteylemrxw4:manage.
+        // gated on plugin:kgebvqj6rsfh4:manage.
         Ok(pb::GetServerAbilitiesResponse {
             abilities: vec![pb::ServerAbility {
                 name: "manage".into(),

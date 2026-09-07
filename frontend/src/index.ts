@@ -3,11 +3,12 @@ import type { PluginDefinition } from '@gameap/plugin-sdk';
 import ModsTab from './components/ModsTab.vue';
 
 export const cs2AddonsPlugin: PluginDefinition = {
-    // Must match src/lib.rs PLUGIN_ID and survive the panel's CompactPluginID
-    // normalization (valid base32, a-z2-7): base32("cs2addon").
-    id: 'mnzteylemrxw4',
+    // Assigned by plugins.gameap.dev. Must match src/lib.rs PLUGIN_ID and
+    // survive the panel's CompactPluginID normalization (valid base32, a-z2-7);
+    // src/consistency.rs enforces both.
+    id: 'kgebvqj6rsfh4',
     name: 'CS2 Addons',
-    version: '0.6.4',
+    version: '1.0.0',
     apiVersion: '1.0',
     description: 'Manage Metamod:Source and CounterStrikeSharp plugins on Counter-Strike 2 servers',
     author: 'SilverSasquatchGameAPDev',
@@ -535,7 +536,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
                 name: 'plugins',
                 checkPermission: {
                     type: 'hasServerPermissions',
-                    permissions: ['plugin:mnzteylemrxw4:manage'],
+                    permissions: ['plugin:kgebvqj6rsfh4:manage'],
                 },
                 // Source 2 only. It has to be by game code, not engine:
                 // Source 1 and Source 2 games share the engine string "Source",

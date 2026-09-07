@@ -15,6 +15,13 @@ env:
   # Ref of gameap/gameap providing web/plugin-sdk; pin to a SHA if the SDK
   # drifts from frontend/package-lock.json
   GAMEAP_REF: main
+  # Oldest panel the store should offer this plugin to. 4.4.0 is where the
+  # gameap-net and gameap-scheduler host modules first shipped (absent in
+  # 4.3.5), and the plugin cannot load without both. The 4.5-only pieces it
+  # uses degrade rather than break: an older panel ignores the declared
+  # required_permissions, and has no nodefs inline cap for the archive guard
+  # to run into.
+  MIN_GAMEAP_VERSION: "4.4.0"
 
 jobs:
   publish:
@@ -94,9 +101,67 @@ jobs:
         working-directory: plugin-cs2-addons
         run: make wasm
 
+      # Attaching to the GitHub release happens before the store upload, so a
+      # store outage or a bad token still leaves a downloadable release.
       - name: Attach the wasm to the release
         working-directory: plugin-cs2-addons
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" cs2-addons.wasm --clobber
+
+      # Optional: the store accepts unsigned uploads. Without the secret this
+      # says so and moves on rather than failing the release.
+      - name: Sign the wasm
+        working-directory: plugin-cs2-addons
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [ -z "$GPG_SIGNING_KEY" ]; then
+            echo "::notice::GPG_SIGNING_KEY is not set; publishing without a signature"
+            exit 0
+          fi
+          printf '%s' "$GPG_SIGNING_KEY" | gpg --batch --import
+          gpg --batch --yes --detach-sign --armor -o cs2-addons.wasm.asc cs2-addons.wasm
+
+      # The GAMEAP_PLUGIN_ID variable is the opt-in: until the plugin is
+      # registered on plugins.gameap.dev there is nothing to publish to, and
+      # releases behave as they did before. Once it is set, a missing or
+      # broken token fails the run rather than passing quietly.
+      - name: Publish to plugins.gameap.dev
+        working-directory: plugin-cs2-addons
+        env:
+          GAMEAP_DEPLOY_TOKEN: ${{ secrets.GAMEAP_DEPLOY_TOKEN }}
+          GAMEAP_PLUGIN_ID: ${{ vars.GAMEAP_PLUGIN_ID }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ -z "$GAMEAP_PLUGIN_ID" ]; then
+            echo "::notice::GAMEAP_PLUGIN_ID is not set; skipping the store upload"
+            exit 0
+          fi
+          if [ -z "$GAMEAP_DEPLOY_TOKEN" ]; then
+            echo "::error::GAMEAP_PLUGIN_ID is set but the GAMEAP_DEPLOY_TOKEN secret is missing"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          printf '%s' "$RELEASE_BODY" > "$RUNNER_TEMP/changelog.md"
+          ARGS=(--fail-with-body -sS
+            -H "Authorization: Bearer ${GAMEAP_DEPLOY_TOKEN}"
+            -F "version=${VERSION}"
+            -F "file=@cs2-addons.wasm"
+            -F "changelog=<${RUNNER_TEMP}/changelog.md"
+            -F "min_gameap_version=${MIN_GAMEAP_VERSION}")
+          # Signature is optional; send it only when the signing step made one.
+          if [ -f cs2-addons.wasm.asc ]; then
+            ARGS+=(-F "signature=@cs2-addons.wasm.asc")
+          fi
+          # is_stable defaults to false on the API, so a stable release has to
+          # say so explicitly.
+          if [ "$PRERELEASE" != "true" ]; then
+            ARGS+=(-F "is_stable=true")
+          fi
+          # No trailing slash: the router answers .../versions/ with a 301 and
+          # curl does not replay the POST body on a redirect.
+          curl "${ARGS[@]}"             "https://plugins.gameap.dev/api/ci/plugins/${GAMEAP_PLUGIN_ID}/versions"
