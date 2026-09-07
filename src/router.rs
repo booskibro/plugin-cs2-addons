@@ -25,6 +25,7 @@ pub enum RouteId {
     CatalogList,
     CatalogInstall,
     PlatformInstall,
+    PlatformFixExecStack,
     SnapshotCreate,
     SnapshotList,
     SnapshotRestore,
@@ -119,6 +120,12 @@ pub const ROUTES: &[RouteDef] = &[
         method: "POST",
         pattern: "/servers/{id}/platform/install",
         description: "Install or update Metamod:Source / CounterStrikeSharp",
+    },
+    RouteDef {
+        id: RouteId::PlatformFixExecStack,
+        method: "POST",
+        pattern: "/servers/{id}/platform/fix-execstack",
+        description: "Clear the executable-stack flag on a platform's native library",
     },
     RouteDef {
         id: RouteId::SnapshotCreate,
@@ -235,6 +242,9 @@ pub fn dispatch<H: HostApi>(host: &mut H, req: &pb::HttpRequest) -> pb::HttpResp
             handlers::catalog_routes::handle_install(host, &params, &req.body, actor)
         }
         RouteId::PlatformInstall => handlers::platform::handle(host, &params, &req.body, actor),
+        RouteId::PlatformFixExecStack => {
+            handlers::execstack::handle(host, &params, &req.body, actor)
+        }
         RouteId::SnapshotCreate => handlers::snapshots::handle_create(host, &params, actor),
         RouteId::SnapshotList => handlers::snapshots::handle_list(host, &params),
         RouteId::SnapshotRestore => {

@@ -162,6 +162,11 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             platform_install: 'Install latest',
             platform_reinstall: 'Reinstall',
+            platform_fix_execstack: 'Fix executable stack',
+            execstack_fixed:
+                'Cleared the executable-stack flag on :path. Restart the server to load it.',
+            execstack_already_clear:
+                'The executable-stack flag was already clear on :path, so that is not what is stopping it loading.',
             platform_installing: 'Installing…',
             platform_update: 'Update to v:version',
             platform_install_title: 'Install :name?',
@@ -420,6 +425,11 @@ export const cs2AddonsPlugin: PluginDefinition = {
 
             platform_install: 'Установить последнюю',
             platform_reinstall: 'Переустановить',
+            platform_fix_execstack: 'Исправить исполняемый стек',
+            execstack_fixed:
+                'Флаг исполняемого стека снят с :path. Перезапустите сервер, чтобы библиотека загрузилась.',
+            execstack_already_clear:
+                'Флаг исполняемого стека на :path и так снят - значит, загрузку останавливает не он.',
             platform_installing: 'Установка…',
             platform_update: 'Обновить до v:version',
             platform_install_title: 'Установить :name?',

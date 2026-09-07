@@ -814,6 +814,92 @@ fn archive_install_puts_bare_folders_under_plugins() {
     assert_eq!(body["folders"][0], "MenuManagerCore");
 }
 
+/// A minimal ELF64 shared object whose PT_GNU_STACK carries the given flags -
+/// 7 (RWE) is what CounterStrikeSharp actually ships.
+fn elf_so(flags: u32) -> Vec<u8> {
+    let phoff: usize = 64;
+    let phentsize: usize = 56;
+    let mut bytes = vec![0u8; phoff + phentsize];
+    bytes[..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+    bytes[4] = 2; // ELF64
+    bytes[5] = 1; // little endian
+    bytes[0x20..0x28].copy_from_slice(&(phoff as u64).to_le_bytes());
+    bytes[0x36..0x38].copy_from_slice(&(phentsize as u16).to_le_bytes());
+    bytes[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes());
+    bytes[phoff..phoff + 4].copy_from_slice(&0x6474_e551u32.to_le_bytes());
+    bytes[phoff + 4..phoff + 8].copy_from_slice(&flags.to_le_bytes());
+    bytes
+}
+
+const CSS_LIB: &str = "addons/counterstrikesharp/bin/linuxsteamrt64/counterstrikesharp.so";
+
+#[test]
+fn fix_execstack_clears_the_flag_and_writes_it_back() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(7));
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["changed"], true);
+    assert_eq!(body["before"], 7);
+    assert_eq!(body["after"], 6);
+
+    let written = host.file(&format!("{GAME}/{CSS_LIB}")).expect("library still there");
+    let stack = crate::source2::elf::find_gnu_stack(written)
+        .expect("still an ELF")
+        .expect("still has PT_GNU_STACK");
+    assert_eq!(stack.flags, 6, "the executable bit must be gone on disk");
+}
+
+/// Running it on a library that never had the flag must say so rather than
+/// implying it repaired something.
+#[test]
+fn fix_execstack_reports_when_there_was_nothing_to_do() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(6));
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["changed"], false);
+    assert!(body["before"].is_null());
+}
+
+#[test]
+fn fix_execstack_refuses_a_missing_library_and_an_unknown_kind() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 404, "{body}");
+    assert_eq!(body["code"], "LIBRARY_NOT_FOUND");
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "metamod"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["code"], "UNSUPPORTED_KIND");
+}
+
 fn catalog_zip() -> Vec<u8> {
     use std::io::Write;
     let mut cursor = std::io::Cursor::new(Vec::new());

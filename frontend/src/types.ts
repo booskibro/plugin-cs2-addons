@@ -22,6 +22,15 @@ export interface CssPluginEntry {
     group_title: string | null;
 }
 
+export interface FixExecStackResult {
+    kind: string;
+    path: string;
+    /** False when the flag was already clear - a cause ruled out, not a repair. */
+    changed: boolean;
+    before: number | null;
+    after: number | null;
+}
+
 export interface MetamodPluginEntry {
     name: string;
     enabled: boolean;

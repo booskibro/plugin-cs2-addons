@@ -262,6 +262,18 @@ pub struct PlatformInstallResponse {
 }
 
 #[derive(Serialize, Debug)]
+pub struct FixExecStackResponse {
+    pub kind: String,
+    /// Server-relative path of the library that was inspected.
+    pub path: String,
+    /// False when there was nothing to clear - which rules a cause out rather
+    /// than claiming a repair.
+    pub changed: bool,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+}
+
+#[derive(Serialize, Debug)]
 pub struct SnapshotInfo {
     pub name: String,
     /// Unix seconds parsed from the snapshot name.

@@ -91,6 +91,19 @@ export async function toggleMetamodPlugin(
     });
 }
 
+/** POST /platform/fix-execstack - clears PF_X on the platform's native library. */
+export async function fixExecStack(
+    pluginId: string,
+    serverId: number,
+    kind: 'metamod' | 'css',
+): Promise<FixExecStackResult> {
+    const response = await axios.post(
+        `${base(pluginId)}/servers/${serverId}/platform/fix-execstack`,
+        { kind },
+    );
+    return response.data as FixExecStackResult;
+}
+
 export async function restartServer(pluginId: string, serverId: number): Promise<void> {
     await axios.post(`${base(pluginId)}/servers/${serverId}/restart`);
 }

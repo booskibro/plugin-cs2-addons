@@ -1,5 +1,6 @@
 pub mod archive;
 pub mod catalog;
+pub mod elf;
 pub mod gamedir;
 pub mod gameinfo;
 pub mod manifest;
@@ -8,6 +9,10 @@ pub mod vdf;
 
 /// CounterStrikeSharp layout relative to the game dir (e.g. game/csgo).
 pub const CSS_DIR: &str = "addons/counterstrikesharp";
+/// The native library Metamod loads, relative to the game dir. Its
+/// executable-stack flag is what stops CounterStrikeSharp loading on current
+/// kernels; see source2::elf.
+pub const CSS_LIBRARY: &str = "addons/counterstrikesharp/bin/linuxsteamrt64/counterstrikesharp.so";
 pub const CSS_PLUGINS_DIR: &str = "addons/counterstrikesharp/plugins";
 pub const CSS_CONFIGS_DIR: &str = "addons/counterstrikesharp/configs/plugins";
 /// Shared contract assemblies (shared/<Name>/<Name>.dll). Plugins load types

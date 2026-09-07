@@ -279,6 +279,7 @@ GET    /servers/{id}/updates             latest upstream versions (?refresh=1)
 GET    /servers/{id}/catalog             curated plugin catalog
 POST   /servers/{id}/catalog/install     {key}             install from GitHub
 POST   /servers/{id}/platform/install    {kind: metamod|css}
+POST   /servers/{id}/platform/fix-execstack {kind: css}  clear PF_X on its library
 POST   /servers/{id}/snapshots           create snapshot
 GET    /servers/{id}/snapshots           list snapshots
 POST   /servers/{id}/snapshots/restore   {name}
