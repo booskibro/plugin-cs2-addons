@@ -5,6 +5,7 @@ pub mod audit;
 pub mod catalog_routes;
 pub mod ctx;
 pub mod doctor;
+pub mod execstack;
 pub mod logs;
 pub mod metamod;
 pub mod platform;

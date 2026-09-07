@@ -150,6 +150,19 @@
                     {{ trans(busy ? 'platform_installing' : 'platform_update', { version: updateVersion ?? '' }) }}
                 </span>
             </GButton>
+            <!-- Its own condition, not part of the chain above: when the
+                 library fails to load, the targeted repair and the
+                 reinstall-from-release fallback are both worth offering. -->
+            <GButton
+                v-if="loadFailed"
+                color="orange"
+                size="small"
+                :disabled="busy"
+                @click="$emit('fix-execstack')"
+            >
+                <i class="fa-solid fa-wrench"></i>
+                <span class="ml-1">{{ trans('platform_fix_execstack') }}</span>
+            </GButton>
         </div>
     </n-card>
 </template>
@@ -175,11 +188,15 @@ const props = defineProps<{
     /** The server console answered at all - so a platform that reports no
      * version is genuinely not loading, rather than merely unreachable. */
     consoleReachable?: boolean;
+    /** Metamod lists this platform as <ERROR>: it found the library and the
+     * load failed, which the executable-stack flag is a known cause of. */
+    loadFailed?: boolean;
 }>();
 
 defineEmits<{
     install: [];
     repair: [];
+    'fix-execstack': [];
     'toggle-vdf': [name: string, enabled: boolean];
 }>();
 
@@ -224,7 +241,12 @@ const reinstallable = computed(
 );
 
 const showActions = computed(
-    () => notActive.value || !installed.value || updateAvailable.value || reinstallable.value,
+    () =>
+        notActive.value ||
+        !installed.value ||
+        updateAvailable.value ||
+        reinstallable.value ||
+        !!props.loadFailed,
 );
 
 const title = computed(() => {

@@ -26,8 +26,15 @@ pub fn handle<H: HostApi>(host: &mut H, params: &HashMap<String, String>) -> Api
         _ => false,
     };
 
+    // An EMPTY addons/counterstrikesharp counts as not installed. The
+    // directory alone used to be the test, so a gutted or half-unpacked folder
+    // read as installed - which hid the Install button behind the one state
+    // where it is most wanted, the same trap the platform card fell into.
     let css_abs = paths::join(&ctx.game_abs, source2::CSS_DIR);
-    let css_installed = host.stat(ctx.node_id, &css_abs)?.is_some_and(|s| s.is_dir);
+    let css_installed = host.stat(ctx.node_id, &css_abs)?.is_some_and(|s| s.is_dir)
+        && host
+            .read_dir(ctx.node_id, &css_abs)?
+            .is_some_and(|entries| !entries.is_empty());
 
     let manifest = super::read_manifest(host, &ctx)?;
 

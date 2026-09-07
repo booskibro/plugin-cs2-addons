@@ -133,9 +133,11 @@
                         :rows="rows"
                         :update-version="cssLatest"
                         :console-reachable="consoleReachable"
+                        :load-failed="cssLoadFailed"
                         :busy="platformBusy"
                         active
                         @install="onPlatformInstall('css')"
+                        @fix-execstack="onFixExecStack"
                     />
                 </div>
 
@@ -248,6 +250,7 @@ import {
     getState,
     getUpdates,
     installCatalogPlugin,
+    fixExecStack,
     installPlatform,
     repairGameinfo,
     restartServer,
@@ -396,6 +399,10 @@ const rconOk = computed(() => rconAvailability.value === 'ok');
 const consoleReachable = computed(
     () => rconAvailability.value === 'ok' || rconAvailability.value === 'no-css',
 );
+
+/** Metamod found the library and the load failed - the state the
+ * executable-stack flag produces. */
+const cssLoadFailed = computed(() => metamodLoadFailure.value !== null);
 
 const metamodLatest = computed(() => updatesData.value?.metamod?.version ?? null);
 const cssLatest = computed(() => updatesData.value?.css?.version ?? null);
@@ -872,6 +879,28 @@ async function toggleVdf(name: string, enabled: boolean, force: boolean): Promis
         toast('error', apiErrorMessage(error, trans('op_failed')));
     } finally {
         mutating.value = false;
+    }
+}
+
+/** Clears PF_X on the platform library, the flag current kernels refuse. */
+async function onFixExecStack(): Promise<void> {
+    platformBusy.value = true;
+    try {
+        const result = await fixExecStack(props.pluginId, props.serverId, 'css');
+        toast(
+            result.changed ? 'success' : 'info',
+            result.changed
+                ? trans('execstack_fixed', { path: result.path })
+                : trans('execstack_already_clear', { path: result.path }),
+        );
+        if (result.changed) {
+            restartDirty.value = true;
+        }
+        await refreshAll();
+    } catch (error) {
+        toast('error', apiErrorMessage(error, trans('op_failed')));
+    } finally {
+        platformBusy.value = false;
     }
 }
 
