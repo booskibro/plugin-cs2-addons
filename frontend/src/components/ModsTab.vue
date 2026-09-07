@@ -120,6 +120,7 @@
                         :version="metaVersion"
                         :rows="[]"
                         :update-version="metamodLatest"
+                        :console-reachable="consoleReachable"
                         :busy="platformBusy"
                         @install="onPlatformInstall('metamod')"
                         @repair="onRepair"
@@ -131,6 +132,7 @@
                         :version="cssVersion"
                         :rows="rows"
                         :update-version="cssLatest"
+                        :console-reachable="consoleReachable"
                         :busy="platformBusy"
                         active
                         @install="onPlatformInstall('css')"
@@ -258,7 +260,9 @@ import {
     isUnknownCommandOutput,
     matchRuntimeToFolders,
     parseCssPlugins,
+    parseMetaInfoFile,
     parseMetaList,
+    parseMetaListErrors,
     parseMetaVersion,
 } from '../lib/rcon-parse';
 import { prettyName } from '../lib/naming';
@@ -296,6 +300,8 @@ type RconAvailability =
 const rconAvailability = ref<RconAvailability>('unknown');
 // Backend explanation for the generic 'error' reason, shown next to the hint.
 const rconErrorDetail = ref<string | null>(null);
+/** Metamod's own verdict on a platform it could not load, when it has one. */
+const metamodLoadFailure = ref<{ index: number; file: string | null } | null>(null);
 const metaVersion = ref<PlatformVersion | null>(null);
 const cssVersion = ref<PlatformVersion | null>(null);
 const cssRuntime = ref<RuntimePluginInfo[]>([]);
@@ -384,6 +390,13 @@ const rconHint = computed(() => {
 
 const rconOk = computed(() => rconAvailability.value === 'ok');
 
+/** The console answered, even if it had bad news. 'no-css' still means Metamod
+ * replied, so a platform reporting no version is not loading rather than
+ * merely out of reach. */
+const consoleReachable = computed(
+    () => rconAvailability.value === 'ok' || rconAvailability.value === 'no-css',
+);
+
 const metamodLatest = computed(() => updatesData.value?.metamod?.version ?? null);
 const cssLatest = computed(() => updatesData.value?.css?.version ?? null);
 
@@ -428,7 +441,14 @@ const frontendChecks = computed<DoctorCheck[]>(() => {
     // plugin table cannot show, because every row falls back to folder state.
     if (state.value?.css.installed && serverOnline.value) {
         if (rconAvailability.value === 'no-css') {
-            checks.push({ id: 'cssloaded', status: 'fail', detail: trans('doctor_css_not_loaded') });
+            const failure = metamodLoadFailure.value;
+            checks.push({
+                id: 'cssloaded',
+                status: 'fail',
+                detail: failure?.file
+                    ? trans('doctor_css_load_error', { file: failure.file })
+                    : trans('doctor_css_not_loaded'),
+            });
         } else if (rconOk.value) {
             checks.push({ id: 'cssloaded', status: 'ok', detail: trans('doctor_css_loaded_ok') });
         }
@@ -541,12 +561,36 @@ async function refreshRcon(): Promise<void> {
             rconErrorDetail.value = null;
             cssVersion.value = null;
             cssRuntime.value = [];
+            await probeLoadFailure(metaListOut);
             return;
         }
         cssRuntime.value = parseCssPlugins(cssPluginsOut);
+        metamodLoadFailure.value = null;
         rconAvailability.value = 'ok';
     } catch (error) {
         applyRconFailure(error);
+    }
+}
+
+/**
+ * Ask Metamod why, instead of only reporting that CounterStrikeSharp is absent.
+ * `meta list` marks a plugin it could not load as <ERROR> - meaning the alias
+ * was found and the load was attempted - and `meta info <n>` names the library
+ * even then. That distinguishes a native load failure from the things a check
+ * would otherwise blame: a missing .vdf, an unwired gameinfo.gi, absent files.
+ * Best-effort: a failure here must not change the tab's verdict.
+ */
+async function probeLoadFailure(metaListOut: string): Promise<void> {
+    metamodLoadFailure.value = null;
+    const [index] = parseMetaListErrors(metaListOut);
+    if (index === undefined) {
+        return;
+    }
+    try {
+        const info = await rcon(props.serverId, `meta info ${index}`, { allowEmpty: true });
+        metamodLoadFailure.value = { index, file: parseMetaInfoFile(info) };
+    } catch {
+        metamodLoadFailure.value = { index, file: null };
     }
 }
 

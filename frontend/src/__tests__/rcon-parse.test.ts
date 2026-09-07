@@ -5,6 +5,8 @@ import {
     isBadPasswordOutput,
     isUnknownCommandOutput,
     matchRuntimeToFolders,
+    parseMetaInfoFile,
+    parseMetaListErrors,
     matchesModuleName,
     parseCssPlugins,
     parseMetaList,
@@ -179,6 +181,39 @@ describe('real server output', () => {
         // UNLOADED in the console is a deliberate stop, not "awaiting load".
         expect(matched[0]?.status).toBe('stopped');
         expect(matched[1]?.status).toBe('running');
+    });
+});
+
+describe('meta list / meta info failure reporting', () => {
+    it('spots a plugin Metamod could not load', () => {
+        expect(parseMetaListErrors(['Listing 1 plugin:', '  [01] <ERROR>'].join('\n'))).toEqual([1]);
+        expect(
+            parseMetaListErrors(
+                [
+                    'Listing 2 plugins:',
+                    '  [01] "CounterStrikeSharp" (1.0.371) by Roflmuffin',
+                    '  [02] <ERROR>',
+                ].join('\n'),
+            ),
+        ).toEqual([2]);
+        // A healthy listing has none.
+        expect(
+            parseMetaListErrors(
+                ['Listing 1 plugin:', '  [01] "CounterStrikeSharp" (1.0.371) by Roflmuffin'].join('\n'),
+            ),
+        ).toEqual([]);
+    });
+
+    it('reads the library path out of meta info', () => {
+        const out = [
+            'Plugin 1 is not loaded.',
+            'File: /srv/gameap/servers/CS2/game/csgo/addons/counterstrikesharp/bin/linuxsteamrt64/counterstrikesharp.so',
+            '',
+        ].join('\n');
+        expect(parseMetaInfoFile(out)).toBe(
+            '/srv/gameap/servers/CS2/game/csgo/addons/counterstrikesharp/bin/linuxsteamrt64/counterstrikesharp.so',
+        );
+        expect(parseMetaInfoFile('Plugin 1 is not loaded.')).toBeNull();
     });
 });
 

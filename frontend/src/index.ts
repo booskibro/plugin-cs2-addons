@@ -161,6 +161,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             vdf_disabled: 'Metamod plugin ":name" disabled - applies after restart',
 
             platform_install: 'Install latest',
+            platform_reinstall: 'Reinstall',
             platform_installing: 'Installing…',
             platform_update: 'Update to v:version',
             platform_install_title: 'Install :name?',
@@ -249,6 +250,8 @@ export const cs2AddonsPlugin: PluginDefinition = {
             doctor_css_loaded_ok: 'Loaded in the running server and answering css_plugins',
             doctor_css_not_loaded:
                 'Installed on disk but not loaded in the running server - every row below shows its folder state only. Check addons/metamod/counterstrikesharp.vdf and restart.',
+            doctor_css_load_error:
+                'Metamod found it and tried: it lists the plugin as <ERROR>, so the library fails to load rather than being missing or disabled. Run "meta load :file" in the RCON console for the exact reason.',
             doctor_check_usercon: 'Launch parameters',
             doctor_check_rcon: 'RCON console',
             doctor_check_metamod: 'Metamod:Source',
@@ -416,6 +419,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             vdf_disabled: 'Metamod-плагин «:name» выключен - применится после перезапуска',
 
             platform_install: 'Установить последнюю',
+            platform_reinstall: 'Переустановить',
             platform_installing: 'Установка…',
             platform_update: 'Обновить до v:version',
             platform_install_title: 'Установить :name?',
@@ -504,6 +508,8 @@ export const cs2AddonsPlugin: PluginDefinition = {
             doctor_css_loaded_ok: 'Загружен на запущенном сервере, отвечает на css_plugins',
             doctor_css_not_loaded:
                 'Установлен на диске, но не загружен на запущенном сервере - строки ниже показывают только состояние папок. Проверьте addons/metamod/counterstrikesharp.vdf и перезапустите сервер.',
+            doctor_css_load_error:
+                'Metamod нашёл его и попытался загрузить: плагин указан как <ERROR>, то есть библиотека не загружается, а не отсутствует и не отключена. Выполните "meta load :file" в консоли RCON, чтобы увидеть точную причину.',
             doctor_check_usercon: 'Параметры запуска',
             doctor_check_rcon: 'Консоль RCON',
             doctor_check_metamod: 'Metamod:Source',

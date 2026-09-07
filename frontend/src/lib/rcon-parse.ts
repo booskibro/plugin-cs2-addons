@@ -190,6 +190,31 @@ function sharedPrefixKey(moduleKey: string, folderKey: string): boolean {
 }
 
 /**
+ * `meta list` prints a plugin Metamod could not load as `[01] <ERROR>` instead
+ * of the usual `[01] "Name" (version) by Author`. That distinction matters:
+ * the alias was found and Metamod tried, so the failure is in loading the
+ * library itself - not a missing .vdf, an unwired gameinfo.gi or absent files,
+ * which are the things a health check would otherwise blame.
+ */
+export function parseMetaListErrors(output: string): number[] {
+    const errors: number[] = [];
+    for (const line of output.split('\n')) {
+        const match = /^\s*\[\s*(\d+)\]\s*<ERROR>\s*$/.exec(line.trimEnd());
+        if (match) {
+            errors.push(Number(match[1]));
+        }
+    }
+    return errors;
+}
+
+/** The library path from `meta info <n>`, which names the file even when the
+ * plugin failed to load. */
+export function parseMetaInfoFile(output: string): string | null {
+    const match = /^\s*File:\s*(\S.*?)\s*$/m.exec(output);
+    return match ? match[1] : null;
+}
+
+/**
  * `Unknown command 'css_plugins'` - the console does not have that command,
  * which for a `css_` command means CounterStrikeSharp is not loaded in the
  * running server (its files on disk say nothing about that). Older CS2 builds
