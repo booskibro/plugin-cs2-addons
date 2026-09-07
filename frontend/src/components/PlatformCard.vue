@@ -129,6 +129,16 @@
                 <span class="ml-1">{{ trans(busy ? 'platform_installing' : 'platform_install') }}</span>
             </GButton>
             <GButton
+                v-else-if="reinstallable"
+                color="orange"
+                size="small"
+                :disabled="busy"
+                @click="$emit('install')"
+            >
+                <i class="fa-solid fa-rotate"></i>
+                <span class="ml-1">{{ trans(busy ? 'platform_installing' : 'platform_reinstall') }}</span>
+            </GButton>
+            <GButton
                 v-else-if="updateAvailable"
                 color="white"
                 size="small"
@@ -162,6 +172,9 @@ const props = defineProps<{
     updateVersion?: string | null;
     metamodPlugins?: MetamodPluginEntry[];
     busy?: boolean;
+    /** The server console answered at all - so a platform that reports no
+     * version is genuinely not loading, rather than merely unreachable. */
+    consoleReachable?: boolean;
 }>();
 
 defineEmits<{
@@ -195,8 +208,23 @@ const updateAvailable = computed(() => {
     return !versionsMatch(props.version.version, props.updateVersion);
 });
 
+/**
+ * On disk, the console is answering, and yet this platform reports no version:
+ * it is installed but not loading. Reinstalling is the obvious repair, and
+ * until now it was the one state with no button at all - `installed` only
+ * means the directory exists, and the update offer needs a running version to
+ * compare against, so a platform broken badly enough not to load lost both.
+ */
+const reinstallable = computed(
+    () =>
+        installed.value &&
+        !props.version &&
+        !!props.consoleReachable &&
+        !updateAvailable.value,
+);
+
 const showActions = computed(
-    () => notActive.value || !installed.value || updateAvailable.value,
+    () => notActive.value || !installed.value || updateAvailable.value || reinstallable.value,
 );
 
 const title = computed(() => {

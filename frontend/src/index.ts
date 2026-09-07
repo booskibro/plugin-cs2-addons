@@ -161,6 +161,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             vdf_disabled: 'Metamod plugin ":name" disabled - applies after restart',
 
             platform_install: 'Install latest',
+            platform_reinstall: 'Reinstall',
             platform_installing: 'Installing…',
             platform_update: 'Update to v:version',
             platform_install_title: 'Install :name?',
@@ -416,6 +417,7 @@ export const cs2AddonsPlugin: PluginDefinition = {
             vdf_disabled: 'Metamod-плагин «:name» выключен - применится после перезапуска',
 
             platform_install: 'Установить последнюю',
+            platform_reinstall: 'Переустановить',
             platform_installing: 'Установка…',
             platform_update: 'Обновить до v:version',
             platform_install_title: 'Установить :name?',

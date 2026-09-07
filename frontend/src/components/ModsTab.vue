@@ -120,6 +120,7 @@
                         :version="metaVersion"
                         :rows="[]"
                         :update-version="metamodLatest"
+                        :console-reachable="consoleReachable"
                         :busy="platformBusy"
                         @install="onPlatformInstall('metamod')"
                         @repair="onRepair"
@@ -131,6 +132,7 @@
                         :version="cssVersion"
                         :rows="rows"
                         :update-version="cssLatest"
+                        :console-reachable="consoleReachable"
                         :busy="platformBusy"
                         active
                         @install="onPlatformInstall('css')"
@@ -383,6 +385,13 @@ const rconHint = computed(() => {
 });
 
 const rconOk = computed(() => rconAvailability.value === 'ok');
+
+/** The console answered, even if it had bad news. 'no-css' still means Metamod
+ * replied, so a platform reporting no version is not loading rather than
+ * merely out of reach. */
+const consoleReachable = computed(
+    () => rconAvailability.value === 'ok' || rconAvailability.value === 'no-css',
+);
 
 const metamodLatest = computed(() => updatesData.value?.metamod?.version ?? null);
 const cssLatest = computed(() => updatesData.value?.css?.version ?? null);
