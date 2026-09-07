@@ -105,6 +105,15 @@ node. A stock Debian/Ubuntu box has everything except possibly `unzip` -
   `gameinfo.gi` line is missing.
 - [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp)
   (the *with runtime* build) in `game/csgo/addons/counterstrikesharp`.
+
+  **Neither has to be there first.** The tab installs both itself from their
+  latest release — downloaded and unpacked on the node — and wires
+  `gameinfo.gi` as part of it, so a bare CS2 server is a fine starting point.
+  Installing them by hand works equally well and is the right move if you want
+  a specific version, a build the release feeds do not carry, or you are
+  adopting a server that already has them: the tab reads what is on disk rather
+  than tracking what it installed, so it picks up an existing setup with
+  nothing to import. The only thing it insists on is the layout above.
 - An **RCON password** on the server. GameAP generates one automatically when
   a server is created, so this is normally already set — nothing to do unless
   it has been cleared. Without it the tab still works — you just lose live data
