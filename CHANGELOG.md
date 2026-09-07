@@ -3,12 +3,42 @@
 Versions are the plugin's own, as reported in `PluginInfo` and shown in the
 panel's plugin list.
 
-**v0.6.4 is the first published release.** Everything below it was developed
+**v0.6.4 was the first GitHub release; 1.0.0 is the first published on
+plugins.gameap.dev.** Everything below it was developed
 and built, but never published as a GitHub release: 0.1.0–0.3.4 exist as
 commits in this repo, while 0.3.5–0.6.3 were working builds that reached a
 live server without being tagged, and landed here folded into the two commits
 that make up v0.6.4. Their entries are kept because the behaviour they
 describe is in the shipped plugin — not because those artifacts are available.
+
+## 1.0.0 — first public release *(released)*
+
+Published on **plugins.gameap.dev**. No functional change to the tab itself.
+
+- **The plugin id changed** from `mnzteylemrxw4` — hand-picked as
+  base32("cs2addon") back when it only had to be unique on one panel — to
+  **`kgebvqj6rsfh4`**, assigned by the store and fixed for the life of the
+  listing. To a panel this makes it a *different plugin*: routes move to
+  `/api/plugins/kgebvqj6rsfh4`, the ability becomes
+  `plugin:kgebvqj6rsfh4:manage`, and per-plugin storage starts empty, so audit
+  history and the cached update checks do not carry over. Snapshots are files
+  on the game server and are unaffected. Anyone running a pre-1.0.0 build
+  should uninstall it before installing this one, or the panel will show two
+  Plugins tabs.
+- **Releases publish themselves to the store.** `release.yml` uploads each
+  GitHub release: version from the tag, changelog from the release body,
+  `is_stable` from whether the release is a prerelease. Signing is optional —
+  with a `GPG_SIGNING_KEY` secret the upload carries a detached signature,
+  without one it goes unsigned, which the store accepts. The store step is
+  skipped entirely until the `GAMEAP_PLUGIN_ID` variable is set.
+- **`min_gameap_version` is declared as 4.4.0** — the release where the
+  `gameap-net` and `gameap-scheduler` host modules first shipped (both absent
+  in 4.3.5), without which the plugin cannot load at all. The 4.5-only pieces
+  degrade rather than break: an older panel ignores the declared
+  `required_permissions`, and has no nodefs inline cap for the archive guard to
+  run into.
+- The README's RCON requirement now says GameAP generates the password when a
+  server is created, instead of implying one has to be set by hand.
 
 ## 0.6.4 — GameAP 4.5 *(released)*
 

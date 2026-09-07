@@ -105,10 +105,11 @@ node. A stock Debian/Ubuntu box has everything except possibly `unzip` -
   `gameinfo.gi` line is missing.
 - [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp)
   (the *with runtime* build) in `game/csgo/addons/counterstrikesharp`.
-- An **RCON password** configured on the server in GameAP. Without it the tab
-  still works — you just lose live data (versions, Running/Stopped states,
-  hot load/unload); everything file-based keeps working and a hint line
-  explains what's unavailable.
+- An **RCON password** on the server. GameAP generates one automatically when
+  a server is created, so this is normally already set — nothing to do unless
+  it has been cleared. Without it the tab still works — you just lose live data
+  (versions, Running/Stopped states, hot load/unload); everything file-based
+  keeps working and a hint line explains what's unavailable.
 
 ## GameAP 4.5
 
@@ -262,7 +263,7 @@ Typical flows:
 
 ## HTTP routes (backend)
 
-All admin-only, under `/api/plugins/mnzteylemrxw4`:
+All admin-only, under `/api/plugins/kgebvqj6rsfh4`:
 
 ```
 GET    /servers/{id}/state               assembled Metamod/CSS state (+ vdf plugins)
@@ -298,7 +299,7 @@ library), and a **ScheduledTaskHandler** with two tasks -
 The tab is shown only on Source 2 servers - gated on game code `cs2`, because
 the panel's tab check matches engine or code and has no engine-version field,
 while Source 1 games share the engine string `Source` - and requires the
-`plugin:mnzteylemrxw4:manage` ability (granted to admins automatically). The
+`plugin:kgebvqj6rsfh4:manage` ability (granted to admins automatically). The
 backend independently verifies engine `source` version `2` on every route. A
 custom game entry with a different code needs adding to `codes` in
 `frontend/src/index.ts`.
@@ -340,7 +341,7 @@ On Windows, `make wasm` translates to
   game code is exactly `cs2` (the tab is gated on that code, so a custom or
   cloned game entry with a different code won't show it — add it to `codes` in
   `frontend/src/index.ts`); your user has admin rights (the
-  `plugin:mnzteylemrxw4:manage` ability is granted to admins automatically).
+  `plugin:kgebvqj6rsfh4:manage` ability is granted to admins automatically).
 - **"could not locate the game directory"** (422 on load) — the server dir
   doesn't contain `game/csgo/gameinfo.gi` (or any `game/*/gameinfo.gi`).
   The server probably isn't installed yet or uses a nonstandard layout.
