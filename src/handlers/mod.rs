@@ -28,23 +28,42 @@ use ctx::ServerCtx;
 
 const MANIFEST_FILE_PERMISSIONS: u32 = 0o644;
 
-/// The panel's per-call nodefs limit, PLUGINS_NODEFS_MAX_INLINE, at its default.
+/// How much one gameap-nodefs *read* may carry, and with it how large an
+/// uploaded archive this plugin will accept.
 ///
-/// GameAP 4.5 caps what one gameap-nodefs download or upload may carry, because
-/// the payload is materialized in panel memory and then copied into the guest.
-/// The default is `32M`, and the panel's ByteSize parser reads every suffix as
-/// binary (`M` = 1 << 20), so it is this number to the byte. Both comparisons
-/// are strict: something exactly this size passes, one byte more is refused
-/// outright rather than truncated.
+/// A download is materialized in panel memory and copied into the guest, so it
+/// cannot be unbounded. This number is the plugin's own gate rather than a
+/// limit the panel reports - nothing in the host API tells the guest what the
+/// panel will accept, so a refusal has to be predicted, not observed.
 ///
-/// Two call paths here are bounded by it, and both check against this constant
-/// rather than keeping their own copy of "32MB" - the point is that they move
-/// together if the panel's default ever does. Note the margin is exactly zero:
-/// an operator who *lowers* PLUGINS_NODEFS_MAX_INLINE puts the panel's limit
-/// below these gates, and the refusal then comes from the panel with a less
-/// useful message. Nothing here can detect that - the panel does not report its
-/// limit to the guest.
+/// 32MB is chosen to sit under the smallest ceiling on the read path that can
+/// be confirmed: the panel's gRPC server is configured for 10MB receive and
+/// 10MB send (GRPC_MAX_RECV_MSG_SIZE / GRPC_MAX_SEND_MSG_SIZE, both defaulting
+/// to 10485760), and a 9.7MB library has been read back through it intact.
+/// Larger reads have not been exercised, so treat this as a bound that has not
+/// been probed rather than one that has been proven.
+///
+/// It binds reads only. Writes are cut off far lower and far more rudely, by
+/// the daemon rather than the panel: see [`MAX_NODE_WRITE_BYTES`]. Do not reuse
+/// this constant to gate anything being sent to a node.
 pub(crate) const PANEL_MAX_INLINE_BYTES: u64 = 32 * 1024 * 1024;
+
+/// What one gameap-nodefs *upload* may carry before the daemon drops the call.
+///
+/// Uploading a 9,731,832-byte library severed the daemon's gRPC session
+/// outright: the panel log records `daemon session unregistered` at the exact
+/// second of each attempt, a reconnect a second later, and the write failed.
+/// Downloading that same file works, so the ceiling is on the daemon's receive
+/// side - below the panel's 10MB gRPC cap and far below the 32MB inline limit
+/// above, which is why nothing here caught it.
+///
+/// gRPC's default max receive size is 4MiB and the daemon does not raise it,
+/// which fits the evidence: ~9.7MB fails, small writes have always worked. The
+/// exact ceiling is not observable from the guest, so this sits a little under
+/// 4MiB to leave room for the path and mode the message carries alongside the
+/// bytes. It is a refusal with an explanation, not a truncation - anything
+/// larger has to go through the file manager.
+pub(crate) const MAX_NODE_WRITE_BYTES: u64 = 4 * 1024 * 1024 - 256 * 1024;
 
 /// Unix seconds. wasm32-wasip1 backs this with the WASI clock; native tests
 /// use the OS clock.
@@ -136,16 +155,15 @@ pub(crate) fn write_archive_entries<H: HostApi>(
     entries: &[crate::source2::archive::ArchiveEntry],
     root: &crate::source2::archive::InstallRoot,
 ) -> Result<u32, ApiError> {
-    // Pre-flight, before a single byte is written. The panel refuses a nodefs
-    // upload over its inline limit, and these entries go up one at a time - so
-    // discovering an oversized one halfway through would leave a half-installed
-    // plugin, which is worse than refusing the archive outright. It is
-    // reachable without the archive itself being oversized: extraction bounds
-    // the total at MAX_TOTAL_UNCOMPRESSED, twice this limit, and nothing bounds
-    // any single member.
+    // Pre-flight, before a single byte is written. These entries go up one at a
+    // time, and one over the daemon's receive limit does not merely fail - it
+    // drops the session - so discovering it halfway through would leave a
+    // half-installed plugin behind a dead connection. It is reachable without
+    // the archive itself being oversized: extraction bounds the total at
+    // MAX_TOTAL_UNCOMPRESSED and nothing bounds any single member.
     if let Some(entry) = entries
         .iter()
-        .find(|entry| entry.data.len() as u64 > PANEL_MAX_INLINE_BYTES)
+        .find(|entry| entry.data.len() as u64 > MAX_NODE_WRITE_BYTES)
     {
         return Err(ApiError::unprocessable(
             "ENTRY_TOO_LARGE",
@@ -153,7 +171,7 @@ pub(crate) fn write_archive_entries<H: HostApi>(
                 "{} is {} bytes, over the {}-byte limit for one file; unpack this archive with the file manager instead",
                 entry.path,
                 entry.data.len(),
-                PANEL_MAX_INLINE_BYTES
+                MAX_NODE_WRITE_BYTES
             ),
         ));
     }

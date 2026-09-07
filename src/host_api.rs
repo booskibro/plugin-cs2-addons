@@ -124,6 +124,10 @@ pub mod mock {
         pub perms: BTreeMap<String, u32>,
         /// Absolute paths of directories.
         pub dirs: BTreeSet<String>,
+        /// upload calls, in call order: (path, content, permissions). Recorded
+        /// as well as applied, because what a write carries - and how big it
+        /// is - is the point of some of these tests.
+        pub uploads: Vec<(String, Vec<u8>, u32)>,
         /// chmod calls, in call order.
         pub chmods: Vec<(String, u32)>,
         /// move_path calls, in call order.
@@ -285,8 +289,10 @@ pub mod mock {
             _node_id: u64,
             path: &str,
             content: &[u8],
-            _permissions: u32,
+            permissions: u32,
         ) -> HostResult<()> {
+            self.uploads
+                .push((path.to_string(), content.to_vec(), permissions));
             self.add_file(path, content);
             Ok(())
         }

@@ -833,8 +833,13 @@ fn elf_so(flags: u32) -> Vec<u8> {
 
 const CSS_LIB: &str = "addons/counterstrikesharp/bin/linuxsteamrt64/counterstrikesharp.so";
 
+/// Where the four-byte patch is staged, and the p_flags offset in `elf_so`:
+/// program headers start at 64 and p_flags is 4 bytes in.
+const PATCH_ABS: &str = "/srv/gameap/servers/cs2/.cs2addons/execstack-patch.bin";
+const FLAGS_OFFSET: usize = 68;
+
 #[test]
-fn fix_execstack_clears_the_flag_and_writes_it_back() {
+fn fix_execstack_writes_the_cleared_flag_on_the_node() {
     let mut host = MockHost::cs2();
     with_css(&mut host);
     host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(7));
@@ -850,11 +855,131 @@ fn fix_execstack_clears_the_flag_and_writes_it_back() {
     assert_eq!(body["before"], 7);
     assert_eq!(body["after"], 6);
 
-    let written = host.file(&format!("{GAME}/{CSS_LIB}")).expect("library still there");
-    let stack = crate::source2::elf::find_gnu_stack(written)
-        .expect("still an ELF")
-        .expect("still has PT_GNU_STACK");
-    assert_eq!(stack.flags, 6, "the executable bit must be gone on disk");
+    // 6 = RW, little-endian, staged 0644 because only dd reads it.
+    let patch = host
+        .uploads
+        .iter()
+        .find(|(path, _, _)| path == PATCH_ABS)
+        .expect("the four bytes are staged as a file");
+    assert_eq!(patch.1, vec![6, 0, 0, 0]);
+    assert_eq!(patch.2, 0o644);
+
+    let lib_abs = format!("{GAME}/{CSS_LIB}");
+    let dd = host
+        .execs
+        .iter()
+        .find(|(command, _)| command.starts_with("dd "))
+        .map(|(command, _)| command.as_str())
+        .expect("dd puts them into the library");
+    assert_eq!(
+        dd,
+        &format!("dd if={PATCH_ABS} of={lib_abs} bs=1 seek={FLAGS_OFFSET} count=4 conv=notrunc"),
+        "conv=notrunc is what stops dd truncating the library to four bytes"
+    );
+
+    assert!(
+        host.execs.iter().any(|(command, _)| command
+            == &format!("od -An -tx1 -j {FLAGS_OFFSET} -N 4 {lib_abs}")),
+        "the bytes are read back rather than trusted"
+    );
+    assert!(
+        host.file(PATCH_ABS).is_none(),
+        "a stale patch file would be written into the next library at the wrong offset"
+    );
+}
+
+/// The reason this route does not simply download, patch and upload: a ~9.7MB
+/// nodefs upload drops the daemon's gRPC session, so nothing may put the
+/// library itself back on the node.
+#[test]
+fn fix_execstack_never_uploads_the_library() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(7));
+
+    let (status, _) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200);
+
+    let lib_abs = format!("{GAME}/{CSS_LIB}");
+    assert!(
+        !host.uploads.iter().any(|(path, _, _)| path == &lib_abs),
+        "the library must be edited in place on the node, never sent back through the panel"
+    );
+    let largest = host.uploads.iter().map(|(_, data, _)| data.len()).max();
+    assert_eq!(largest, Some(4), "only the four changed bytes travel");
+}
+
+/// dd failing has to be reported, not swallowed - the library is still broken
+/// and the user needs to know the repair did not happen.
+#[test]
+fn fix_execstack_reports_a_failed_write() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(7));
+    host.exec_results.insert(
+        "dd ".into(),
+        (1, "dd: failed to open: Read-only file system".into()),
+    );
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["code"], "WRITE_FAILED");
+    assert!(
+        body["message"].as_str().is_some_and(|m| m.contains("Read-only file system")),
+        "the node's own words are more useful than ours: {body}"
+    );
+    assert!(host.file(PATCH_ABS).is_none(), "the scratch file goes either way");
+}
+
+/// A write that reports success but leaves the old bytes there must fail: this
+/// edits a library the server needs in order to start.
+#[test]
+fn fix_execstack_fails_when_the_bytes_do_not_read_back() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(7));
+    host.exec_results
+        .insert("od ".into(), (0, " 07 00 00 00
+".into()));
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["code"], "VERIFY_FAILED");
+}
+
+/// od is coreutils, but a node without it - or with different formatting -
+/// must not turn a good write into a reported failure.
+#[test]
+fn fix_execstack_accepts_a_write_it_cannot_verify() {
+    let mut host = MockHost::cs2();
+    with_css(&mut host);
+    host.add_file(&format!("{GAME}/{CSS_LIB}"), &elf_so(7));
+    host.exec_results
+        .insert("od ".into(), (127, "od: command not found".into()));
+
+    let (status, body) = body_json(crate::handlers::execstack::handle(
+        &mut host,
+        &params("3"),
+        br#"{"kind": "css"}"#,
+        Some("john"),
+    ));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["changed"], true);
 }
 
 /// Running it on a library that never had the flag must say so rather than
@@ -1340,11 +1465,11 @@ fn an_entry_over_the_panel_inline_limit_is_refused_before_anything_is_written() 
 
     let entries = vec![
         sized_entry("ok.txt", 8),
-        sized_entry("huge.bin", crate::handlers::PANEL_MAX_INLINE_BYTES + 1),
+        sized_entry("huge.bin", crate::handlers::MAX_NODE_WRITE_BYTES + 1),
     ];
 
     let err = crate::handlers::write_archive_entries(&mut host, &ctx, &entries, &crate::source2::archive::InstallRoot::GameDir)
-        .expect_err("an entry over the inline limit must be refused");
+        .expect_err("an entry over the node write limit must be refused");
 
     assert_eq!(err.status, 422);
     // Not even the small entry ahead of it — the check runs before the loop.
@@ -1352,16 +1477,16 @@ fn an_entry_over_the_panel_inline_limit_is_refused_before_anything_is_written() 
 }
 
 #[test]
-fn an_entry_exactly_at_the_panel_inline_limit_is_written() {
-    // The panel's own comparison is strict — its tests pin 4096 bytes against
-    // a 4096 cap as an accepted upload — so the boundary value has to pass
-    // here too, or the two disagree at exactly one size and the guard refuses
-    // a file the panel would have taken.
+fn an_entry_exactly_at_the_node_write_limit_is_written() {
+    // The comparison is strict, so the cap names the largest accepted size
+    // rather than the first rejected one. Pinned because an off-by-one here is
+    // silent: it would refuse a file that uploads perfectly well, with a
+    // message telling the user to go and do it by hand.
     let mut host = MockHost::cs2();
     with_css(&mut host);
     let ctx = crate::handlers::ctx::ServerCtx::resolve(&mut host, &params("3")).expect("ctx");
 
-    let entries = vec![sized_entry("exact.bin", crate::handlers::PANEL_MAX_INLINE_BYTES)];
+    let entries = vec![sized_entry("exact.bin", crate::handlers::MAX_NODE_WRITE_BYTES)];
 
     let written = crate::handlers::write_archive_entries(&mut host, &ctx, &entries, &crate::source2::archive::InstallRoot::GameDir)
         .expect("the boundary value is not over the limit");

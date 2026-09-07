@@ -15,9 +15,10 @@
 //! `patchelf --clear-execstack` does — which is a four-byte edit at a computed
 //! offset rather than a rewrite of the library.
 //!
-//! Doing it here rather than shelling out matters: `execstack` shipped in
-//! `prelink`, which recent distributions dropped, so the documented fix is
-//! unavailable on exactly the systems new enough to need it.
+//! Computing the offset here rather than shelling out matters: `execstack`
+//! shipped in `prelink`, which recent distributions dropped, so the documented
+//! fix is unavailable on exactly the systems new enough to need it. This module
+//! only locates the four bytes; `handlers::execstack` puts them on the node.
 
 pub const PT_GNU_STACK: u32 = 0x6474_e551;
 pub const PF_X: u32 = 0x1;
@@ -104,24 +105,6 @@ pub fn find_gnu_stack(bytes: &[u8]) -> Result<Option<GnuStack>, String> {
     Ok(None)
 }
 
-/// Clears `PF_X` in place. Returns the before/after flags when it changed, and
-/// `None` when there was nothing to do — either no `PT_GNU_STACK` header or the
-/// flag was already clear, which is worth reporting rather than claiming a fix.
-pub fn clear_exec_stack(bytes: &mut [u8]) -> Result<Option<(u32, u32)>, String> {
-    let Some(stack) = find_gnu_stack(bytes)? else {
-        return Ok(None);
-    };
-    if !stack.executable() {
-        return Ok(None);
-    }
-    let cleared = stack.flags & !PF_X;
-    bytes
-        .get_mut(stack.flags_offset..stack.flags_offset + 4)
-        .ok_or("truncated program header")?
-        .copy_from_slice(&cleared.to_le_bytes());
-    Ok(Some((stack.flags, cleared)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,26 +127,24 @@ mod tests {
     }
 
     #[test]
-    fn finds_and_clears_an_executable_stack() {
+    fn finds_an_executable_stack_and_says_where_it_is() {
         // 7 = RWE, which is what CounterStrikeSharp ships.
-        let mut bytes = elf_with_stack_flags(7);
+        let bytes = elf_with_stack_flags(7);
         let found = find_gnu_stack(&bytes).expect("parses").expect("has PT_GNU_STACK");
         assert_eq!(found.flags, 7);
         assert!(found.executable());
+        // The offset is what gets written to on the node, so it has to be the
+        // p_flags field itself and not the start of the header.
         assert_eq!(found.flags_offset, 64 + P_FLAGS);
-
-        assert_eq!(clear_exec_stack(&mut bytes).expect("patches"), Some((7, 6)));
-        let after = find_gnu_stack(&bytes).expect("parses").expect("still there");
-        assert_eq!(after.flags, 6);
-        assert!(!after.executable());
+        assert_eq!(u32_at(&bytes, found.flags_offset), Some(7));
     }
 
     #[test]
-    fn an_already_clear_flag_is_left_alone() {
-        let mut bytes = elf_with_stack_flags(6);
-        let before = bytes.clone();
-        assert_eq!(clear_exec_stack(&mut bytes).expect("parses"), None);
-        assert_eq!(bytes, before, "nothing may be written when there is nothing to fix");
+    fn an_already_clear_flag_is_reported_as_clear() {
+        let bytes = elf_with_stack_flags(6);
+        let found = find_gnu_stack(&bytes).expect("parses").expect("has PT_GNU_STACK");
+        assert_eq!(found.flags, 6);
+        assert!(!found.executable(), "nothing may be written when there is nothing to fix");
     }
 
     #[test]
@@ -172,7 +153,6 @@ mod tests {
         // Turn the only program header into something else.
         bytes[64..68].copy_from_slice(&1u32.to_le_bytes());
         assert_eq!(find_gnu_stack(&bytes).expect("parses"), None);
-        assert_eq!(clear_exec_stack(&mut bytes).expect("parses"), None);
     }
 
     #[test]
