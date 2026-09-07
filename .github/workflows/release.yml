@@ -61,8 +61,15 @@ jobs:
           VERSION="${TAG#v}"
           sed -i "s/^version = \".*\"$/version = \"${VERSION}\"/" Cargo.toml
           sed -i "s/^    version: '.*',$/    version: '${VERSION}',/" frontend/src/index.ts
+          # package.json and both root entries of package-lock.json count too:
+          # src/consistency.rs checks all four copies and the Test step below
+          # runs it, so rewriting only some of them fails the release. npm does
+          # the lockfile correctly; a sed cannot, because dependency entries
+          # carry a "version" key at the same indent as the root one.
+          ( cd frontend && npm version "${VERSION}" --no-git-tag-version --allow-same-version >/dev/null )
           grep -q "^version = \"${VERSION}\"$" Cargo.toml
           grep -q "version: '${VERSION}'," frontend/src/index.ts
+          grep -q "\"version\": \"${VERSION}\"" frontend/package.json
 
       # The @gameap/ui tarball on npm is missing its icons/ directory, so the
       # package from the gameap checkout is installed over it. SDK is built with
