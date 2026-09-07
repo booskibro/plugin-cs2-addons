@@ -21,6 +21,23 @@ function base(pluginId: string): string {
     return `/api/plugins/${pluginId}`;
 }
 
+/**
+ * Options that opt a request out of the panel's route-wide cancellation.
+ *
+ * The panel's axios instance attaches a shared AbortController to every request
+ * (config/axios.js) unless one is already set, and aborts it on route change
+ * (config/requestCancellation.js, wired in routes.js). For a read that is
+ * harmless. For a long write it is not: these calls move megabytes or run a
+ * download on the node, and a navigation part-way through would abandon the
+ * request while the work carries on server-side - or worse, cut it off between
+ * reading a file and writing it back. Supplying a signal we never fire leaves
+ * the interceptor's `!config.signal` check false, so nothing else can cancel
+ * them.
+ */
+function uninterruptible(): { signal: AbortSignal } {
+    return { signal: new AbortController().signal };
+}
+
 export async function getState(pluginId: string, serverId: number): Promise<StateResponse> {
     const response = await axios.get(`${base(pluginId)}/servers/${serverId}/state`);
     return response.data as StateResponse;
@@ -100,6 +117,7 @@ export async function fixExecStack(
     const response = await axios.post(
         `${base(pluginId)}/servers/${serverId}/platform/fix-execstack`,
         { kind },
+        uninterruptible(),
     );
     return response.data as FixExecStackResult;
 }
@@ -137,9 +155,11 @@ export async function installCatalogPlugin(
     serverId: number,
     key: string,
 ): Promise<CatalogInstallResult> {
-    const response = await axios.post(`${base(pluginId)}/servers/${serverId}/catalog/install`, {
-        key,
-    });
+    const response = await axios.post(
+        `${base(pluginId)}/servers/${serverId}/catalog/install`,
+        { key },
+        uninterruptible(),
+    );
     return response.data as CatalogInstallResult;
 }
 
@@ -148,9 +168,11 @@ export async function installPlatform(
     serverId: number,
     kind: 'metamod' | 'css',
 ): Promise<PlatformInstallResult> {
-    const response = await axios.post(`${base(pluginId)}/servers/${serverId}/platform/install`, {
-        kind,
-    });
+    const response = await axios.post(
+        `${base(pluginId)}/servers/${serverId}/platform/install`,
+        { kind },
+        uninterruptible(),
+    );
     return response.data as PlatformInstallResult;
 }
 
@@ -158,7 +180,11 @@ export async function createSnapshot(
     pluginId: string,
     serverId: number,
 ): Promise<SnapshotCreateResult> {
-    const response = await axios.post(`${base(pluginId)}/servers/${serverId}/snapshots`);
+    const response = await axios.post(
+        `${base(pluginId)}/servers/${serverId}/snapshots`,
+        undefined,
+        uninterruptible(),
+    );
     return response.data as SnapshotCreateResult;
 }
 
@@ -172,7 +198,11 @@ export async function restoreSnapshot(
     serverId: number,
     name: string,
 ): Promise<void> {
-    await axios.post(`${base(pluginId)}/servers/${serverId}/snapshots/restore`, { name });
+    await axios.post(
+        `${base(pluginId)}/servers/${serverId}/snapshots/restore`,
+        { name },
+        uninterruptible(),
+    );
 }
 
 export async function deleteSnapshot(
@@ -197,6 +227,7 @@ export async function installArchive(
     const response = await axios.post(
         `${base(pluginId)}/servers/${serverId}/plugins/install-archive`,
         { path, force },
+        uninterruptible(),
     );
     return response.data as InstallArchiveResult;
 }
